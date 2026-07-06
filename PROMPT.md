@@ -226,15 +226,21 @@ the interface.
   the real names/ids/domain at deploy time from the variables below.
 
 ### GitHub Actions variables (non-sensitive)
+**Required:**
 - `CLOUDFLARE_ACCOUNT_ID` — target Cloudflare account
-- `CLOUDFLARE_ZONE_ID` — DNS zone that owns `APP_DOMAIN` (for the custom domain/route)
 - `APP_DOMAIN` — public domain, e.g. `potion.posty.social`
-- `WORKER_NAME` — Worker/service name
-- `D1_DATABASE_NAME` — D1 database name
-- `R2_BUCKET_NAME` — assets bucket (uploads/covers/files)
-- `PULUMI_STATE_BUCKET` — R2 bucket holding Pulumi state
-- `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID` — OAuth client ids (providers configured
-  only if their id + secret are present)
+
+**Optional — have sensible defaults; Pulumi creates the resource under the default
+name, so only set these to customise:**
+- `WORKER_NAME` — default `potion`
+- `D1_DATABASE_NAME` — default `${WORKER_NAME}-db`
+- `R2_BUCKET_NAME` — assets bucket, default `${WORKER_NAME}-assets`
+- `PULUMI_STATE_BUCKET` — default `${WORKER_NAME}-pulumi-state` (created by the
+  bootstrap step, not `pulumi up` — see Setup / bootstrap)
+- `CLOUDFLARE_ZONE_ID` — derived from `APP_DOMAIN` via a zone lookup if omitted
+
+**Optional — OAuth (a provider is enabled only if its id *and* secret are set):**
+- `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID`
 
 ### GitHub Actions secrets (sensitive)
 - `CLOUDFLARE_API_TOKEN` — provision + deploy
@@ -246,22 +252,46 @@ the interface.
 
 ### Pulumi pipeline (on push to main)
 - Build the app → run D1 migrations (`wrangler d1 migrations apply`) → `pulumi up`.
-- Pulumi provisions/references the D1 database, R2 assets bucket, the page Durable
-  Object namespace + migration, and the Worker; binds the custom domain from
-  `APP_DOMAIN`; and pushes the secrets above as Worker secret bindings.
-- All resource names/ids/domain are read from the variables/secrets — never
-  literals in the repo.
+- **Pulumi creates** (using the default or overridden names): the D1 database, the
+  R2 assets bucket, the page Durable Object namespace + migration, and the Worker;
+  binds the custom domain from `APP_DOMAIN` (looking up the zone if
+  `CLOUDFLARE_ZONE_ID` is unset); and pushes the sensitive values as Worker secret
+  bindings. The **only** resource it doesn't create is its own state bucket
+  (`PULUMI_STATE_BUCKET`), which must pre-exist.
+- All resource names/ids/domain come from the variables/secrets (or their
+  defaults) — never literals in the repo.
+
+### Setup / bootstrap
+Ship a `scripts/setup.sh` (or `bun scripts/setup.ts`) so a self-hoster configures a
+fork in one run. It should:
+- Check `wrangler` + `gh` are installed and authenticated (`wrangler whoami`,
+  `gh auth status`).
+- Generate the two stable secrets: `BETTER_AUTH_SECRET`
+  (`npx @better-auth/cli@latest secret`) and `PULUMI_CONFIG_PASSPHRASE`
+  (`openssl rand -base64 32`). (They must stay constant across deploys, so set once.)
+- Create the **Pulumi state R2 bucket** with wrangler — the one resource that must
+  exist before `pulumi up` (it's Pulumi's backend).
+- Read the account id from `wrangler whoami`; prompt for `APP_DOMAIN` and for the
+  paste-in values that can only come from the dashboard (CF API token, R2 S3 access
+  key/secret).
+- Push everything with `gh variable set` / `gh secret set` (bulk from a temp
+  dotenv via `-f`), leaving defaulted names unset unless the user customises them.
+- Optionally trigger the first deploy (`gh workflow run` or push to `main`).
+
+Everything else — D1 DB, assets bucket, Worker, DO, custom domain — is created by
+`pulumi up` on that first deploy. A thin Claude Code **skill** can wrap this script
+to walk the user through the manual dashboard token steps interactively.
 
 ### README
 The README must clearly document self-hosting so anyone can deploy their own copy:
 - **Prerequisites**: a Cloudflare account + API token, and a domain/zone on
   Cloudflare.
-- **Every required GitHub Actions variable and secret**, listed in two tables
-  (variables vs secrets) matching the lists above, each with a one-line
-  description of what it is and where to get it.
-- The **flow**: fork → add the variables + secrets in repo settings → push to
-  `main` → the Actions/Pulumi pipeline provisions everything and deploys to
-  `APP_DOMAIN`.
+- **Quick path**: fork → run `scripts/setup.sh` → push to `main`. The script
+  provisions the state bucket and populates the repo's variables/secrets; the
+  Actions/Pulumi pipeline then creates everything else and deploys to `APP_DOMAIN`.
+- **Manual reference**: two tables (variables vs secrets) matching the lists above,
+  each row noting whether it's **required** or **has a default**, and where to get
+  it — so users who skip the script can set them by hand in repo settings.
 - A note that OAuth providers are optional (only enabled when their id + secret
   are set) and which redirect URIs to register (`https://$APP_DOMAIN/api/auth/
   callback/{google,github}`).
