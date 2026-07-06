@@ -38,7 +38,7 @@ Done when:
 
 ## Stage 3 - Auth Gate And Owner Setup
 
-Status: queued
+Status: done
 
 Goal: make the private workspace ready for real users without committing
 secrets.

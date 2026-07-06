@@ -10,6 +10,9 @@ GitHub Actions variables:
 - `APP_DOMAIN` - required, for example `potion.example.com`.
 - `TRUSTED_ORIGINS` - optional comma-separated auth origins if more than
   `https://$APP_DOMAIN` should be accepted.
+- `WORKSPACE_AUTH_REQUIRED` - required for production. Use `true` when Better
+  Auth credentials and the first owner account are ready; keep `false` only for
+  local/demo verification.
 - `WORKER_NAME` - optional, default `potion`.
 - `D1_DATABASE_NAME` - optional, default `potion-db`.
 - `R2_BUCKET_NAME` - optional, default `potion-assets`.

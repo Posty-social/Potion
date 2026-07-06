@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { isWorkspaceAuthRequired } from './access'
 import { getPage, listPages } from './mock-data'
 import {
   WorkspaceRepositoryError,
@@ -86,6 +87,15 @@ describe('workspace data safety', () => {
 })
 
 describe('workspace input validation', () => {
+  it('parses the auth gate flag explicitly', () => {
+    expect(isWorkspaceAuthRequired()).toBe(false)
+    expect(isWorkspaceAuthRequired('false')).toBe(false)
+    expect(isWorkspaceAuthRequired('0')).toBe(false)
+    expect(isWorkspaceAuthRequired('true')).toBe(true)
+    expect(isWorkspaceAuthRequired('yes')).toBe(true)
+    expect(isWorkspaceAuthRequired('ON')).toBe(true)
+  })
+
   it('defaults invalid collection views to table', () => {
     expect(pageSearchSchema.parse({ view: 'board' }).view).toBe('table')
     expect(pageSearchSchema.parse({}).view).toBe('table')

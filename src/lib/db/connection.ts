@@ -21,6 +21,7 @@ export type RuntimeEnv = Env & {
   R2_SECRET_ACCESS_KEY?: string
   R2_BUCKET_NAME?: string
   TRUSTED_ORIGINS?: string
+  WORKSPACE_AUTH_REQUIRED?: string
 }
 
 export function createDb(database: D1Database): AppDatabase {

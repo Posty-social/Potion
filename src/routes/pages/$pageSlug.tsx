@@ -1,8 +1,14 @@
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { Link, createFileRoute, notFound } from '@tanstack/react-router'
+import {
+  Link,
+  createFileRoute,
+  notFound,
+  redirect,
+} from '@tanstack/react-router'
 
 import { Button } from '#/components/ui/button'
 import { WorkspaceShell } from '#/components/workspace/workspace-shell'
+import { getWorkspaceAccess } from '#/lib/workspace/access.functions'
 import {
   workspacePageQuery,
   workspacePagesQuery,
@@ -11,6 +17,20 @@ import { pageSearchSchema } from '#/lib/workspace/schemas'
 
 export const Route = createFileRoute('/pages/$pageSlug')({
   validateSearch: pageSearchSchema,
+  beforeLoad: async ({ location }) => {
+    const access = await getWorkspaceAccess()
+
+    if (access.authRequired && !access.user) {
+      throw redirect({
+        to: '/login',
+        search: {
+          redirect: location.href,
+        },
+      })
+    }
+
+    return { access }
+  },
   loader: async ({ context, params }) => {
     const pages = await context.queryClient.ensureQueryData(
       workspacePagesQuery(),

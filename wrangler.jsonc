@@ -33,6 +33,7 @@
     "BETTER_AUTH_URL": "http://localhost:3000",
     "APP_DOMAIN": "localhost:3000",
     "R2_BUCKET_NAME": "potion-assets",
+    "WORKSPACE_AUTH_REQUIRED": "false",
   },
   "d1_databases": [
     {
