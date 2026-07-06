@@ -24,11 +24,10 @@ the Workers runtime (no package).
 - Schemas should be validated in the validate portion of the server function, not inside the function
 
 ```typescript
-const createPostSchema = z.object({
-  channelIds: z.array(z.string()).min(1),
-  scheduledAt: z.number().nullable().optional(),
+const createPageSchema = z.object({
+  organizationId: z.string(),
+  parentPageId: z.string().nullable().optional(),
   title: z.string().max(500),
-  workspaceId: z.string(),
 })
 ```
 
@@ -40,10 +39,10 @@ const createPostSchema = z.object({
   duration) so requests are debuggable and queryable via Workers observability.
 
 ```typescript
-export const createPost = createServerFn({ method: "POST" })
-  .middleware([canCreatePosts])
-  .inputValidator(createPostSchema)
-  .handler(async ({ context, data }) => {}
+export const createPage = createServerFn({ method: 'POST' })
+  .middleware([requireOrgMember])
+  .inputValidator(createPageSchema)
+  .handler(async ({ context, data }) => {})
 ```
 
 ## Routing
@@ -51,19 +50,22 @@ export const createPost = createServerFn({ method: "POST" })
 - Use TanStack Router file-based routing properly — the URL is the source of truth
   for what's on screen, so any state that should survive a refresh or be shareable
   via a link lives in the URL, not in component state or context.
-- **Resource ids go in the path.** Pages are addressed by id, e.g.
-  `/pages/$pageId` (and org-scoped routes like `/$orgSlug/pages/$pageId`). Read
-  them with `Route.useParams()`.
+- **Resource identifiers go in the path.** Pages are addressed by slug, e.g.
+  `/pages/$pageSlug`, read with `Route.useParams()`. There is **no org segment
+  in the URL** — a user always has an active organization (from the better-auth
+  session), and slugs are unique per org, so the slug is resolved against
+  `(activeOrganizationId, slug)`. Public share links resolve via `/p/$token`
+  with no session required.
 - **Filters, sorts, view selection, and options go in typed search params**
   (query string) so refreshing keeps state and links reproduce it exactly — e.g.
-  `/pages/$pageId?view=kanban&groupBy=status&filter=...&sort=due:desc`.
+  `/pages/$pageSlug?view=kanban&groupBy=status&filter=...&sort=due:desc`.
 - Validate every route's search params with `validateSearch` using a Zod schema
   (consistent with the Schemas section); read them with `Route.useSearch()`.
 - Navigate/update filters with the typed `<Link>` / `navigate({ search })` and
   functional updates — never hand-build query strings:
 
 ```typescript
-export const Route = createFileRoute('/pages/$pageId')({
+export const Route = createFileRoute('/pages/$pageSlug')({
   validateSearch: z.object({
     view: z
       .enum(['table', 'kanban', 'calendar', 'gallery', 'list'])
@@ -93,15 +95,18 @@ navigate({ search: (prev) => ({ ...prev, view: 'kanban' }) })
   the function) so routes and components share the same keys and types:
 
 ```typescript
-export const pageQuery = (pageId: string) =>
+export const pageQuery = (pageSlug: string) =>
   queryOptions({
-    queryKey: ['page', pageId],
-    queryFn: () => getPage({ data: { pageId } }),
+    queryKey: ['page', pageSlug],
+    queryFn: () => getPage({ data: { slug: pageSlug } }),
   })
 ```
 
-- **Prefetch in route loaders** with `queryClient.ensureQueryData(pageQuery(id))`
-  for SSR + instant navigation (the app already wires `@tanstack/react-router-ssr-query`).
+- **Prefetch in route loaders** with
+  `queryClient.ensureQueryData(pageQuery(params.pageSlug))` for SSR + instant
+  navigation (the app already wires `@tanstack/react-router-ssr-query`). The
+  page read resolves the slug and returns the page **id**, which everything
+  downstream (blocks, DO socket, mutations) keys off.
 - Keep query keys structured and derived from route params/search so filtered
   views cache independently, e.g. `['collection', collectionId, 'rows', search]`.
 - After a mutation, `invalidateQueries` the affected keys; use **optimistic
@@ -111,7 +116,9 @@ export const pageQuery = (pageId: string) =>
 
 ## Realtime (Durable Objects + WebSockets)
 
-The app is **fully realtime** — every page edit propagates live to all viewers.
+The app is **fully realtime** — every page edit propagates live to all
+authenticated viewers. (Public-link visitors get plain server-fn reads, never a
+socket — see Public sharing in the schema design principles.)
 
 - **One Durable Object per page** (`env.PAGE_DOC.idFromName(pageId)`) is the
   coordination point for that page's collaboration.
@@ -158,8 +165,9 @@ The app is **fully realtime** — every page edit propagates live to all viewers
   signed with `aws4fetch` (Workers-friendly). These are the same R2 creds listed
   in Deployment.
 - The `asset` table records `r2Key`/mime/size/owner/org and backs image/file
-  blocks, page covers, and the `files` field type; use it to garbage-collect
-  orphaned objects.
+  blocks, page covers, and the `files` field type. App rows reference
+  `asset.id`, never raw r2 keys; use the table to garbage-collect orphaned
+  objects.
 
 ## MCP server
 
@@ -195,7 +203,9 @@ the interface.
   backs the MCP `search pages` tool).
 - Use SQLite **FTS5** virtual table(s) synced from `page`/`block`, scoped by org
   and gated by the same permission checks as everywhere else. Keep the index
-  updated at the write points (the DO flush + CRUD mutations).
+  updated at the write points (the DO flush + CRUD mutations). FTS5 virtual
+  tables can't be expressed in the Drizzle schema — create them in a
+  hand-written migration alongside the drizzle-kit generated ones.
 
 ## UI
 
@@ -203,31 +213,34 @@ the interface.
   (buttons, inputs, dialogs, dropdowns, popovers, selects, tabs, tooltips,
   command palette, context menus, etc.). Compose from them; only build custom
   components for genuinely Notion-specific surfaces (block editor, kanban board).
-- Add components with the shadcn CLI, e.g. `pnpm dlx shadcn@latest add button`
-  (per `.cursorrules`); keep them in the configured components directory and style
-  with Tailwind.
+- Add components with the shadcn CLI, e.g. `bunx shadcn@latest add button`
+  (this repo is bun-first — `.cursorrules` shows the same command via pnpm);
+  keep them in the configured components directory and style with Tailwind.
 
 ## Features
 
 - Create pages with editor support
-- Choose a format to store the pages in, probably markdown
+- Page content is stored as markdown in blocks (decided — see Database schema)
 - A user should be able to add blocks to a page
 - A user should be able to choose blocks to add to a page, such as a configurable kanban board
-- A user should be able to make tables with customisable columns and columns types
+- A user should be able to make tables with customisable columns and column types
+- A user should be able to comment on pages and blocks (threaded, resolvable)
 - By default all users inside an organisation should have full access to a page
+- A user should be able to share a page publicly via a revocable read-only link
 - A user should be able to connect with a full-featured MCP server
 
 ## Auth
 
 - Use better-auth
 - Auth config goes inside src/lib/auth.ts
+- Email & password auth is always enabled (the app must work with no OAuth configured)
 - Make sure Google OAuth & GitHub are configured if the required variables are defined
 - Use better-auth organizations
 - You should be able to invite users to an organization with full read & write or read-only permissions
 
 ## Database
 
-- Put database connection login inside src/lib/db/connection.ts
+- Put database connection logic inside src/lib/db/connection.ts
 - Put schemas inside src/lib/db/schema.ts
 - The database will be CloudFlare D1
 
@@ -271,15 +284,21 @@ name, so only set these to customise:**
 ### GitHub Actions secrets (sensitive)
 
 - `CLOUDFLARE_API_TOKEN` — provision + deploy
-- `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — S3-compatible creds for the Pulumi
-  R2 state backend (`https://<account>.r2.cloudflarestorage.com`)
+- `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — S3-compatible creds, used twice:
+  the Pulumi R2 state backend (`https://<account>.r2.cloudflarestorage.com`) and,
+  pushed as Worker secrets, presigning asset URLs (see Files & uploads)
 - `PULUMI_CONFIG_PASSPHRASE` — encrypts Pulumi secrets in state
 - `BETTER_AUTH_SECRET`
 - `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`
 
 ### Pulumi pipeline (on push to main)
 
-- Build the app → run D1 migrations (`wrangler d1 migrations apply`) → `pulumi up`.
+- Build the app → run D1 migrations (`wrangler d1 migrations apply`) →
+  `pulumi up`. Migrations run first so old code never meets a schema it doesn't
+  know — which means migrations must be **backwards-compatible**
+  (expand/contract). **First-deploy exception**: the database doesn't exist
+  until `pulumi up` creates it, so the pipeline skips the migration step when
+  the DB is missing and applies migrations immediately after `pulumi up` instead.
 - **Pulumi creates** (using the default or overridden names): the D1 database, the
   R2 assets bucket, the page Durable Object namespace + migration, and the Worker;
   binds the custom domain from `APP_DOMAIN` (looking up the zone if
@@ -297,7 +316,7 @@ fork in one run. It should:
 - Check `wrangler` + `gh` are installed and authenticated (`wrangler whoami`,
   `gh auth status`).
 - Generate the two stable secrets: `BETTER_AUTH_SECRET`
-  (`npx @better-auth/cli@latest secret`) and `PULUMI_CONFIG_PASSPHRASE`
+  (`bunx @better-auth/cli@latest secret`) and `PULUMI_CONFIG_PASSPHRASE`
   (`openssl rand -base64 32`). (They must stay constant across deploys, so set once.)
 - Create the **Pulumi state R2 bucket** with wrangler — the one resource that must
   exist before `pulumi up` (it's Pulumi's backend).
@@ -361,6 +380,13 @@ access to that org's content (enforced in middleware).
 - **Permissions.** Org membership drives default access via `member.role`
   (`owner`/`admin`/`member` = write, `viewer` = read-only for invites). An
   optional `pagePermission` override table enables granular per-page sharing later.
+- **Public sharing.** A page is shared to the web via a `publicLink` row — an
+  unguessable token granting **read-only** access to that page (optionally its
+  descendants) with no session. Public reads go through dedicated server
+  functions gated by the token — never the org middleware, and never a DO write
+  socket. Presigned asset GETs for a publicly shared page go through the same
+  token gate so images/covers render for anonymous visitors. Revoking the link
+  (or archiving the page) cuts access immediately.
 - **MCP.** The MCP server is an interface over the same tables reusing the auth +
   permission middleware (see the MCP server section). Auth uses better-auth's
   **`mcp` plugin** (OAuth provider; generates its own tables), with the `apiKey`
@@ -368,7 +394,7 @@ access to that org's content (enforced in middleware).
 
 ### Auth tables — generated by better-auth, do not hand-author
 
-better-auth owns its schema. Run `npx @better-auth/cli@latest generate` after
+better-auth owns its schema. Run `bunx @better-auth/cli@latest generate` after
 configuring `src/lib/auth.ts` (email/password + Google/GitHub + `organization`
 plugin + `drizzleAdapter`) to emit the Drizzle tables. Generate them into their
 own file (e.g. `src/lib/db/auth.schema.ts`) so regenerating never clobbers the
@@ -383,16 +409,21 @@ import surface. The generated set is, for reference only (FK targets used below)
 ### App tables
 
 - **page** — id, organizationId→organization, `parentPageId`→page (self, tree
-  nesting), title, icon, coverImageKey (R2), position (fractional), isArchived +
+  nesting), title, slug (URL-safe, unique per org — generated from the title
+  with a short random suffix on collision; **stable across renames** so links
+  don't break), icon, coverAssetId→asset (nullable), position (fractional), isArchived +
   archivedAt (trash), createdByUserId, lastEditedByUserId, version, timestamps
 - **block** — id, pageId→page, `parentBlockId`→block (self, nesting), type
   (paragraph/heading_1‑3/lists/to_do/toggle/quote/callout/code/divider/image/
   file/bookmark/page_link/column_list/column/database), content (markdown),
-  properties (JSON), `collectionId`→collection (for `database` blocks — kanban or
-  table), position, createdByUserId, lastEditedByUserId, version, timestamps
-- **collection** — id, organizationId→organization, pageId→page (inline db,
-  nullable), title, `schema` (JSON array of field/column defs: id/name/type/
-  options), timestamps
+  properties (JSON), `collectionId`→collection (**canonical** block↔collection
+  link, for `database` blocks — kanban or table), position, createdByUserId,
+  lastEditedByUserId, version, timestamps
+- **collection** — id, organizationId→organization, pageId→page (nullable,
+  **denormalised** — mirrors the owning `database` block's page for cheap
+  page-scoped queries; `block.collectionId` is the source of truth, keep in sync
+  when moving blocks), title, `schema` (JSON array of field/column defs:
+  id/name/type/options), timestamps
 - **collectionRow** — id, collectionId→collection, `values` (JSON keyed by field
   id), position, `pageId`→page (row opens as its own page, nullable),
   createdByUserId, lastEditedByUserId, version, timestamps
@@ -403,14 +434,21 @@ import surface. The generated set is, for reference only (FK targets used below)
   parentCommentId→comment (threads), authorUserId→user, body (markdown),
   resolvedAt, timestamps
 - **asset** — id, organizationId, r2Key, mime, sizeBytes, uploadedByUserId,
-  createdAt. Backs image/file blocks, page covers, and the `files` field type;
-  lets us garbage-collect orphaned R2 objects and track ownership. Blocks/pages
-  reference `asset.id` (or store the r2Key directly + reconcile).
+  createdAt. Backs image/file blocks, page covers, and the `files` field type.
+  Everything references `asset.id` (page `coverAssetId`, image/file block
+  `properties`, `files` field values) — **never raw r2Keys** — so orphaned R2
+  objects are found with a simple anti-join and ownership is always trackable.
 - **pagePermission** (optional override layer) — id, pageId→page, organizationId,
   subjectType (user/organization/role), subjectId, access (read/write/full),
   createdAt; unique on (pageId, subjectType, subjectId). Use a **sentinel**
   `subjectId` (e.g. `'*'` for org-wide) instead of NULL — SQLite treats NULLs as
   distinct, so a nullable column would let duplicate grants through the unique index.
+- **publicLink** — id, pageId→page, organizationId, token (unguessable, e.g.
+  nanoid ≥21 chars, **unique**), includeChildPages (bool), expiresAt (nullable),
+  revokedAt (nullable — revoke rather than delete so a link can't be silently
+  re-minted at the same URL), createdByUserId, createdAt. Access is always
+  read-only; index on pageId (enforce "one live link per page" in the create
+  server fn, not the schema, so revoked history can be kept).
 
 ### Column/field types for collections (customisable tables)
 
@@ -432,8 +470,15 @@ are keyed by field id.
 - Composite indexes should include `position` for the ordered-list queries, e.g.
   `block(pageId, parentBlockId, position)`, `page(organizationId, parentPageId,
 position)`, `collectionRow(collectionId, position)`.
-- D1 enforces foreign keys, so the `onDelete: cascade`/`set null` rules above do
-  the cleanup; deletes cascade page→blocks→(collections, comments) etc.
+- Unique indexes for the two lookups that happen on every page load:
+  `page(organizationId, slug)` for slug routing and `publicLink(token)` for
+  public-link resolution.
+- D1 enforces foreign keys, so `onDelete: cascade`/`set null` rules do the
+  cleanup. Deleting a page cascades directly to its blocks, comments, and
+  public links (`block.pageId`, `comment.pageId`, `publicLink.pageId`) and to
+  its inline collections via `collection.pageId`, which in turn cascades to
+  rows and views. `block.collectionId` also cascades, so deleting a collection
+  removes its `database` block.
 
 ### Files & migrations
 
