@@ -1,0 +1,12 @@
+BETTER_AUTH_SECRET=replace-with-output-from-better-auth-cli-secret
+WORKSPACE_AUTH_REQUIRED=false
+
+# Optional local OAuth provider values.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# Optional local R2 presigning values.
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=

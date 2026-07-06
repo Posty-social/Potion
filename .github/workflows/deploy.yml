@@ -1,0 +1,79 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      WORKER_NAME: ${{ vars.WORKER_NAME || 'potion' }}
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'potion-db' }}
+      R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME || 'potion-assets' }}
+      PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET || 'potion-pulumi-state' }}
+      WORKSPACE_AUTH_REQUIRED: ${{ vars.WORKSPACE_AUTH_REQUIRED || 'true' }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GITHUB_CLIENT_ID: ${{ vars.GITHUB_CLIENT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REGION: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: pulumi/setup-pulumi@v2
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright
+        run: bun x playwright install --with-deps chromium
+
+      - name: Verify
+        run: bun run verify
+
+      - name: Pulumi Login
+        run: |
+          pulumi login "s3://${PULUMI_STATE_BUCKET}?endpoint=https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com&region=auto&s3ForcePathStyle=true"
+
+      - name: Provision Cloudflare Resources
+        run: |
+          pulumi stack select production --create --cwd infra
+          pulumi up --yes --cwd infra
+
+      - name: Apply D1 Migrations
+        run: bun run db:migrate:remote
+
+      - name: Sync Worker Runtime Values
+        run: |
+          printf "%s" "https://${APP_DOMAIN}" | bun x wrangler secret put BETTER_AUTH_URL
+          printf "%s" "${APP_DOMAIN}" | bun x wrangler secret put APP_DOMAIN
+          printf "%s" "${BETTER_AUTH_SECRET}" | bun x wrangler secret put BETTER_AUTH_SECRET
+          printf "%s" "${WORKSPACE_AUTH_REQUIRED}" | bun x wrangler secret put WORKSPACE_AUTH_REQUIRED
+          printf "%s" "${R2_BUCKET_NAME}" | bun x wrangler secret put R2_BUCKET_NAME
+          printf "%s" "${R2_ACCESS_KEY_ID}" | bun x wrangler secret put R2_ACCESS_KEY_ID
+          printf "%s" "${R2_SECRET_ACCESS_KEY}" | bun x wrangler secret put R2_SECRET_ACCESS_KEY
+          if [ -n "${GOOGLE_CLIENT_ID}" ]; then printf "%s" "${GOOGLE_CLIENT_ID}" | bun x wrangler secret put GOOGLE_CLIENT_ID; fi
+          if [ -n "${GOOGLE_CLIENT_SECRET}" ]; then printf "%s" "${GOOGLE_CLIENT_SECRET}" | bun x wrangler secret put GOOGLE_CLIENT_SECRET; fi
+          if [ -n "${GITHUB_CLIENT_ID}" ]; then printf "%s" "${GITHUB_CLIENT_ID}" | bun x wrangler secret put GITHUB_CLIENT_ID; fi
+          if [ -n "${GITHUB_CLIENT_SECRET}" ]; then printf "%s" "${GITHUB_CLIENT_SECRET}" | bun x wrangler secret put GITHUB_CLIENT_SECRET; fi
+
+      - name: Deploy Worker
+        run: bun x wrangler deploy

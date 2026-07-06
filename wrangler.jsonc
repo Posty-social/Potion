@@ -7,7 +7,7 @@
   "name": "potion",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   "observability": {
     "enabled": true,
   },
@@ -29,7 +29,39 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-  // "vars": {  "MY_VARIABLE": "production_value" }
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:3000",
+    "APP_DOMAIN": "localhost:3000",
+    "R2_BUCKET_NAME": "potion-assets",
+    "WORKSPACE_AUTH_REQUIRED": "false",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "potion-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "potion-assets",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PAGE_DOC",
+        "class_name": "PageDoc",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PageDoc"],
+    },
+  ],
   /**
    * Static Assets
    * https://developers.cloudflare.com/workers/static-assets/binding/
