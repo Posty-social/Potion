@@ -1,12 +1,25 @@
 import { describe, expect, it } from 'vitest'
 
+import {
+  assetUploadIntentSchema,
+  buildR2AssetKey,
+  missingR2SigningVariables,
+  sanitizeAssetFileName,
+} from '../assets/intents'
 import { isWorkspaceAuthRequired } from './access'
+import { createImportSlug, sanitizeImportedText } from './import'
 import { getPage, listPages } from './mock-data'
 import {
   WorkspaceRepositoryError,
   createSeedWorkspaceRepository,
 } from './repository'
-import { getPageSchema, pageSearchSchema, updateBlockSchema } from './schemas'
+import {
+  getPageSchema,
+  importPrivateChatSchema,
+  pageSearchSchema,
+  updateBlockSchema,
+} from './schemas'
+import { createPublicLinkToken, isPublicLinkToken } from './share'
 
 describe('workspace data safety', () => {
   it('lists summaries without block content', () => {
@@ -84,6 +97,37 @@ describe('workspace data safety', () => {
       ),
     )
   })
+
+  it('imports sanitized private chats with public links disabled', async () => {
+    const repository = createSeedWorkspaceRepository()
+    const imported = await repository.importPrivateChat({
+      title: 'Housing Notes',
+      transcript: 'Deb\r\n\x00Aimee',
+      source: 'Notion reference',
+    })
+
+    expect(imported).toMatchObject({
+      slug: 'housing-notes',
+      title: 'Housing Notes',
+    })
+
+    const page = await repository.getPage('housing-notes')
+
+    expect(page?.share).toMatchObject({
+      publicEnabled: false,
+      includeChildren: false,
+      tokenPreview: 'pub_disabled',
+    })
+    expect(page?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'quote',
+          content: 'Deb\nAimee',
+          properties: { source: 'Notion reference' },
+        }),
+      ]),
+    )
+  })
 })
 
 describe('workspace input validation', () => {
@@ -131,5 +175,65 @@ describe('workspace input validation', () => {
         version: 1,
       }).success,
     ).toBe(false)
+  })
+
+  it('sanitizes private import input before repository use', () => {
+    expect(sanitizeImportedText('  one\r\ntwo\x00  ')).toBe('one\ntwo')
+    expect(
+      importPrivateChatSchema.parse({
+        title: '  Exported chat  ',
+        transcript: '  Line one\r\nLine two  ',
+      }),
+    ).toEqual({
+      title: 'Exported chat',
+      transcript: 'Line one\nLine two',
+    })
+  })
+
+  it('deduplicates private import slugs', () => {
+    expect(createImportSlug('Housing Notes', new Set(['housing-notes']))).toBe(
+      'housing-notes-2',
+    )
+    expect(createImportSlug('!@#', new Set())).toBe('private-import')
+  })
+
+  it('validates token-shaped public links', () => {
+    const token = createPublicLinkToken('12345678-90ab-cdef-1234-567890abcdef')
+
+    expect(token).toBe('pub_1234567890abcdef1234567890abcdef')
+    expect(isPublicLinkToken(token)).toBe(true)
+    expect(isPublicLinkToken('pub_disabled')).toBe(false)
+  })
+
+  it('validates R2 asset upload intents and sanitized keys', () => {
+    expect(
+      assetUploadIntentSchema.safeParse({
+        fileName: 'notes.png',
+        mime: 'image/png',
+        sizeBytes: 1024,
+      }).success,
+    ).toBe(true)
+    expect(
+      assetUploadIntentSchema.safeParse({
+        fileName: 'large.bin',
+        mime: 'application/octet-stream',
+        sizeBytes: 51 * 1024 * 1024,
+      }).success,
+    ).toBe(false)
+    expect(sanitizeAssetFileName(' private/chat?.png ')).toBe(
+      'private-chat-.png',
+    )
+    expect(
+      buildR2AssetKey({
+        assetId: 'asset_123',
+        fileName: ' private/chat?.png ',
+      }),
+    ).toBe('assets/asset_123/private-chat-.png')
+    expect(
+      missingR2SigningVariables({
+        CLOUDFLARE_ACCOUNT_ID: 'account',
+        R2_BUCKET_NAME: 'bucket',
+      }),
+    ).toEqual(['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'])
   })
 })

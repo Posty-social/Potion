@@ -1,6 +1,11 @@
-import { pages as seedPages } from './mock-data'
+import { createImportSlug } from './import'
+import { currentUser, pages as seedPages } from './mock-data'
 import type { WorkspacePage, WorkspacePageSummary } from './mock-data'
-import type { UpdateBlockInput } from './schemas'
+import {
+  importPrivateChatSchema,
+  type ImportPrivateChatInput,
+  type UpdateBlockInput,
+} from './schemas'
 
 type WorkspaceRepositoryErrorCode =
   | 'page_not_found'
@@ -29,6 +34,9 @@ export type WorkspaceRepository = {
   listPages: () => Promise<WorkspacePageSummary[]>
   getPage: (slug: string) => Promise<WorkspacePage | undefined>
   updateBlock: (input: UpdateBlockInput) => Promise<WorkspaceBlockUpdate>
+  importPrivateChat: (
+    input: ImportPrivateChatInput,
+  ) => Promise<WorkspacePageSummary>
 }
 
 type WorkspaceState = {
@@ -103,6 +111,61 @@ export function createSeedWorkspaceRepository(
         content: block.content,
         version: nextVersion,
       }
+    },
+    async importPrivateChat(input) {
+      const data = importPrivateChatSchema.parse(input)
+      const slug = createImportSlug(
+        data.title,
+        new Set(state.pages.map((page) => page.slug)),
+      )
+      const now = new Date().toISOString()
+      const pageId = `page_import_${crypto.randomUUID()}`
+      const transcriptBlockId = `block_import_transcript_${crypto.randomUUID()}`
+      const importedPage: WorkspacePage = {
+        id: pageId,
+        slug,
+        title: data.title,
+        icon: 'I',
+        updatedAt: now,
+        owner: currentUser,
+        collaborators: [currentUser],
+        share: {
+          publicEnabled: false,
+          includeChildren: false,
+          tokenPreview: 'pub_disabled',
+        },
+        blocks: [
+          {
+            id: `block_import_title_${crypto.randomUUID()}`,
+            type: 'heading_1',
+            content: data.title,
+          },
+          {
+            id: `block_import_notice_${crypto.randomUUID()}`,
+            type: 'callout',
+            content:
+              'Imported privately. Public links are disabled until explicitly enabled.',
+          },
+          {
+            id: transcriptBlockId,
+            type: 'quote',
+            content: data.transcript,
+            properties: {
+              source: data.source ?? 'Private chat import',
+            },
+          },
+        ],
+        collections: [],
+        comments: [],
+      }
+
+      state.pages.unshift(importedPage)
+
+      for (const block of importedPage.blocks) {
+        state.blockVersions.set(block.id, 1)
+      }
+
+      return toPageSummary(importedPage)
     },
   }
 }

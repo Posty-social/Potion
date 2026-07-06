@@ -2,7 +2,11 @@ import { queryOptions } from '@tanstack/react-query'
 import { createServerFn } from '@tanstack/react-start'
 
 import { workspaceRepository } from './repository'
-import { getPageSchema, updateBlockSchema } from './schemas'
+import {
+  getPageSchema,
+  importPrivateChatSchema,
+  updateBlockSchema,
+} from './schemas'
 
 export const listWorkspacePages = createServerFn({ method: 'GET' }).handler(
   async () => workspaceRepository.listPages(),
@@ -23,6 +27,10 @@ export const getWorkspacePage = createServerFn({ method: 'GET' })
 export const updateWorkspaceBlock = createServerFn({ method: 'POST' })
   .validator(updateBlockSchema)
   .handler(async ({ data }) => workspaceRepository.updateBlock(data))
+
+export const importPrivateChat = createServerFn({ method: 'POST' })
+  .validator(importPrivateChatSchema)
+  .handler(async ({ data }) => workspaceRepository.importPrivateChat(data))
 
 export const workspacePagesQuery = () =>
   queryOptions({

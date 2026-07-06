@@ -52,7 +52,7 @@ Done when:
 
 ## Stage 4 - Import, Assets, And Sharing
 
-Status: queued
+Status: done
 
 Goal: turn the Notion replacement into a usable private import and sharing
 tool.
