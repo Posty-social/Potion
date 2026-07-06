@@ -7,6 +7,32 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --workspace-bg: #ece9df;
+  --workspace-paper: #fbfaf5;
+  --workspace-paper-glass: rgba(251, 250, 245, 0.9);
+  --workspace-side: #f2efe6;
+  --workspace-panel: #f7f4ec;
+  --workspace-muted: #f1eee5;
+  --workspace-hover: #e7e0d2;
+  --workspace-line: rgba(42, 38, 31, 0.14);
+  --workspace-ink: #24231f;
+  --workspace-ink-soft: #625d51;
+  --accent-teal: #217a78;
+  --accent-brass: #c88f31;
+  --accent-brass-ink: #2c1e08;
+  --accent-plum: #6d4b7c;
+  --accent-rust: #ad5942;
+  --callout-bg: #f7ecd8;
+  --callout-line: rgba(173, 89, 66, 0.24);
+  --gallery-strip: linear-gradient(135deg, #217a78, #c88f31 58%, #6d4b7c);
+  --status-done: #1f6d45;
+  --status-done-bg: #dcebdd;
+  --status-progress: #7c4b16;
+  --status-progress-bg: #f1dfbd;
+  --status-next: #225c85;
+  --status-next-bg: #dce8f2;
+  --status-planned: #6d4b7c;
+  --status-planned-bg: #eadff0;
   --sea-ink: #173a40;
   --sea-ink-soft: #416166;
   --lagoon: #4fb8b2;
@@ -51,7 +77,7 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
+  --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
   --sidebar-primary: oklch(0.21 0.006 285.885);
@@ -165,23 +191,17 @@ body,
 
 body {
   margin: 0;
-  color: var(--sea-ink);
+  color: var(--workspace-ink);
   font-family: var(--font-sans);
-  background-color: var(--bg-base);
+  background-color: var(--workspace-bg);
   background:
-    radial-gradient(1100px 620px at -8% -10%, var(--hero-a), transparent 58%),
-    radial-gradient(1050px 620px at 112% -12%, var(--hero-b), transparent 62%),
-    radial-gradient(
-      720px 380px at 50% 115%,
-      rgba(79, 184, 178, 0.1),
-      transparent 68%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--sand) 68%, white) 0%,
-      var(--foam) 44%,
-      var(--bg-base) 100%
-    );
+    linear-gradient(rgba(42, 38, 31, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42, 38, 31, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, #f5f1e7 0%, var(--workspace-bg) 50%, #e3ded2 100%);
+  background-size:
+    30px 30px,
+    30px 30px,
+    auto;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -189,37 +209,12 @@ body {
 
 body::before {
   content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.28;
-  background:
-    radial-gradient(
-      circle at 20% 15%,
-      rgba(255, 255, 255, 0.8),
-      transparent 34%
-    ),
-    radial-gradient(
-      circle at 78% 26%,
-      rgba(79, 184, 178, 0.2),
-      transparent 42%
-    ),
-    radial-gradient(circle at 42% 82%, rgba(47, 106, 74, 0.14), transparent 36%);
+  display: none;
 }
 
 body::after {
   content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.14;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: radial-gradient(circle at 50% 30%, black, transparent 78%);
+  display: none;
 }
 
 a {
@@ -304,11 +299,23 @@ a {
 }
 
 .island-kicker {
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   text-transform: uppercase;
   font-weight: 700;
   font-size: 0.69rem;
   color: var(--kicker);
+}
+
+.workspace-cover {
+  background:
+    linear-gradient(135deg, rgba(33, 122, 120, 0.18), transparent 38%),
+    linear-gradient(
+      108deg,
+      transparent 0 48%,
+      rgba(200, 143, 49, 0.22) 48% 58%,
+      transparent 58%
+    ),
+    linear-gradient(180deg, #faf7ed 0%, #eee6d8 100%);
 }
 
 .nav-link {
