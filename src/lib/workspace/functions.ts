@@ -1,17 +1,17 @@
 import { queryOptions } from '@tanstack/react-query'
 import { createServerFn } from '@tanstack/react-start'
 
-import { getPage as getMockPage, listPages as listMockPages } from './mock-data'
+import { workspaceRepository } from './repository'
 import { getPageSchema, updateBlockSchema } from './schemas'
 
 export const listWorkspacePages = createServerFn({ method: 'GET' }).handler(
-  async () => listMockPages(),
+  async () => workspaceRepository.listPages(),
 )
 
 export const getWorkspacePage = createServerFn({ method: 'GET' })
   .validator(getPageSchema)
   .handler(async ({ data }) => {
-    const page = getMockPage(data.slug)
+    const page = await workspaceRepository.getPage(data.slug)
 
     if (!page) {
       throw new Error('Page not found')
@@ -22,13 +22,7 @@ export const getWorkspacePage = createServerFn({ method: 'GET' })
 
 export const updateWorkspaceBlock = createServerFn({ method: 'POST' })
   .validator(updateBlockSchema)
-  .handler(async ({ data }) => ({
-    ok: true,
-    blockId: data.blockId,
-    pageId: data.pageId,
-    content: data.content,
-    version: data.version + 1,
-  }))
+  .handler(async ({ data }) => workspaceRepository.updateBlock(data))
 
 export const workspacePagesQuery = () =>
   queryOptions({

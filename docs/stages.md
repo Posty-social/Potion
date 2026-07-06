@@ -22,7 +22,7 @@ Done when:
 
 ## Stage 2 - Workspace Data Layer
 
-Status: queued
+Status: done
 
 Goal: move workspace reads and writes behind a repository boundary that can use
 D1 in production while keeping deterministic seed data for local verification.
