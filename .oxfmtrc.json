@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 80,
+  "tabWidth": 2,
+  "sortImports": true,
+  "sortTailwindcss": true,
+  "ignorePatterns": ["src/routeTree.gen.ts", "worker-configuration.d.ts"]
+}

@@ -1,0 +1,13 @@
+# Lefthook — https://lefthook.dev
+# Installed via the package.json "prepare" script (`lefthook install`).
+#
+# On commit, format the staged files with oxfmt and re-stage the result, so
+# whatever you commit is already formatted. Linting is left to `bun run lint`
+# (and CI) rather than blocking every commit — add a lint job below if you want
+# it enforced here too.
+pre-commit:
+  jobs:
+    - name: format
+      glob: '*.{js,jsx,ts,tsx,json,jsonc,css,md,mdx,html,yaml,yml}'
+      run: node_modules/.bin/oxfmt --write {staged_files}
+      stage_fixed: true

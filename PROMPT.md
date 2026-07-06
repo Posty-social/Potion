@@ -5,11 +5,13 @@ Your job is to build a realtime notion clone that runs on Cloudflare workers, D1
 Find relevant skills in .agents/skills
 
 ## Dependencies to add
+
 Packages this plan relies on that aren't installed yet:
+
 - `aws4fetch` — sign R2 presigned GET/PUT URLs from the Worker
 - `@modelcontextprotocol/sdk` — MCP server transport + tools
 - `@pulumi/pulumi`, `@pulumi/cloudflare` — infrastructure-as-code for deploy (CI/dev)
-- *(optional)* `yjs` — only if adopting CRDT for character-level co-editing
+- _(optional)_ `yjs` — only if adopting CRDT for character-level co-editing
 
 Already present: `drizzle-orm` + `drizzle-kit`, and `zod` (make it a direct
 dependency — it's used app-wide). better-auth's `organization` / `mcp` / `apiKey`
@@ -17,6 +19,7 @@ plugins ship with better-auth, so no separate install. Durable Objects are part 
 the Workers runtime (no package).
 
 ## Schemas
+
 - All inputs and outputs to server functions should have Zod schemas that validate them
 - Schemas should be validated in the validate portion of the server function, not inside the function
 
@@ -26,10 +29,11 @@ const createPostSchema = z.object({
   scheduledAt: z.number().nullable().optional(),
   title: z.string().max(500),
   workspaceId: z.string(),
-});
+})
 ```
 
 ## Functions
+
 - Use Tanstack Router createServerFn where possible, avoid creating REST API endpoints. Make sure all functions have the correct logging, auth and schema validation middleware.
 - **Logging**: a logging middleware emits one structured **wide/canonical event
   per request** (requestId, userId, orgId, route, input summary, outcome,
@@ -43,6 +47,7 @@ export const createPost = createServerFn({ method: "POST" })
 ```
 
 ## Routing
+
 - Use TanStack Router file-based routing properly — the URL is the source of truth
   for what's on screen, so any state that should survive a refresh or be shareable
   via a link lives in the URL, not in component state or context.
@@ -60,7 +65,9 @@ export const createPost = createServerFn({ method: "POST" })
 ```typescript
 export const Route = createFileRoute('/pages/$pageId')({
   validateSearch: z.object({
-    view: z.enum(['table', 'kanban', 'calendar', 'gallery', 'list']).default('table'),
+    view: z
+      .enum(['table', 'kanban', 'calendar', 'gallery', 'list'])
+      .default('table'),
     groupBy: z.string().optional(),
     filter: z.string().optional(),
     sort: z.string().optional(),
@@ -75,6 +82,7 @@ navigate({ search: (prev) => ({ ...prev, view: 'kanban' }) })
   navigation so links stay consistent.
 
 ## Data fetching (queries & mutations)
+
 - **All server reads go through TanStack Query** (`useQuery` / `useSuspenseQuery`).
   No raw `fetch`, no `useEffect` data loading — every server function read is
   called via Query.
@@ -86,7 +94,10 @@ navigate({ search: (prev) => ({ ...prev, view: 'kanban' }) })
 
 ```typescript
 export const pageQuery = (pageId: string) =>
-  queryOptions({ queryKey: ['page', pageId], queryFn: () => getPage({ data: { pageId } }) })
+  queryOptions({
+    queryKey: ['page', pageId],
+    queryFn: () => getPage({ data: { pageId } }),
+  })
 ```
 
 - **Prefetch in route loaders** with `queryClient.ensureQueryData(pageQuery(id))`
@@ -99,7 +110,9 @@ export const pageQuery = (pageId: string) =>
   `setQueryData` (or targeted `invalidateQueries`) rather than refetching.
 
 ## Realtime (Durable Objects + WebSockets)
+
 The app is **fully realtime** — every page edit propagates live to all viewers.
+
 - **One Durable Object per page** (`env.PAGE_DOC.idFromName(pageId)`) is the
   coordination point for that page's collaboration.
 - Clients open a **WebSocket** to the page's DO (via an upgrade route that
@@ -117,7 +130,7 @@ The app is **fully realtime** — every page edit propagates live to all viewers
   broadcast → debounced flush). Everything else (create/rename/archive page,
   collections + fields/views, comments, invites, permission changes) goes through
   **server functions + TanStack Query mutations** and writes D1 directly; those
-  may *notify* the page DO to broadcast an invalidation, but must never
+  may _notify_ the page DO to broadcast an invalidation, but must never
   double-write a row the DO owns.
 - **Presence**: the DO tracks connected users + live cursors/selection and
   broadcasts join/leave/cursor events. Presence is ephemeral — never persisted
@@ -130,6 +143,7 @@ The app is **fully realtime** — every page edit propagates live to all viewers
   broadcasts. Ordering/insertion uses the fractional-index `position`.
 
 ## Files & uploads (R2)
+
 - File bytes go **directly between browser and R2 via presigned URLs** — they
   never pass through the Worker.
 - **Upload (presigned PUT)**: the client calls a server fn (auth + org check,
@@ -148,9 +162,11 @@ The app is **fully realtime** — every page edit propagates live to all viewers
   orphaned objects.
 
 ## MCP server
+
 Expose a **remote MCP server** so users can connect external tooling (e.g. Claude)
 to their workspace. Data model + permissions are already covered — this is just
 the interface.
+
 - **Transport**: a Streamable HTTP MCP endpoint on a Worker route (e.g. `/mcp`).
   Requires adding the MCP SDK (`@modelcontextprotocol/sdk`) — not yet a
   dependency. Back long-lived/streaming sessions with a Durable Object if needed.
@@ -174,6 +190,7 @@ the interface.
   tool schema.
 
 ## Search
+
 - Global search over page titles + block content (Notion-style quick-find; also
   backs the MCP `search pages` tool).
 - Use SQLite **FTS5** virtual table(s) synced from `page`/`block`, scoped by org
@@ -181,6 +198,7 @@ the interface.
   updated at the write points (the DO flush + CRUD mutations).
 
 ## UI
+
 - Use **shadcn/ui** components wherever possible instead of hand-rolling UI
   (buttons, inputs, dialogs, dropdowns, popovers, selects, tabs, tooltips,
   command palette, context menus, etc.). Compose from them; only build custom
@@ -190,6 +208,7 @@ the interface.
   with Tailwind.
 
 ## Features
+
 - Create pages with editor support
 - Choose a format to store the pages in, probably markdown
 - A user should be able to add blocks to a page
@@ -199,6 +218,7 @@ the interface.
 - A user should be able to connect with a full-featured MCP server
 
 ## Auth
+
 - Use better-auth
 - Auth config goes inside src/lib/auth.ts
 - Make sure Google OAuth & GitHub are configured if the required variables are defined
@@ -206,11 +226,13 @@ the interface.
 - You should be able to invite users to an organization with full read & write or read-only permissions
 
 ## Database
+
 - Put database connection login inside src/lib/db/connection.ts
 - Put schemas inside src/lib/db/schema.ts
 - The database will be CloudFlare D1
 
 ## Deployment
+
 - Only a production deployment will exist.
 - Deployments happen on push to `main`, automated in GitHub Actions and run with
   [Pulumi](https://www.pulumi.com). Pulumi state is stored in an R2 bucket.
@@ -222,16 +244,19 @@ the interface.
 - The custom domain is a variable, e.g. `APP_DOMAIN=potion.posty.social`. Pulumi
   binds it to the Worker and it derives `BETTER_AUTH_URL` (`https://$APP_DOMAIN`)
   and the OAuth redirect URIs (`https://$APP_DOMAIN/api/auth/callback/{provider}`).
-- `wrangler.jsonc` holds only local-dev defaults + binding *shapes*; Pulumi injects
+- `wrangler.jsonc` holds only local-dev defaults + binding _shapes_; Pulumi injects
   the real names/ids/domain at deploy time from the variables below.
 
 ### GitHub Actions variables (non-sensitive)
+
 **Required:**
+
 - `CLOUDFLARE_ACCOUNT_ID` — target Cloudflare account
 - `APP_DOMAIN` — public domain, e.g. `potion.posty.social`
 
 **Optional — have sensible defaults; Pulumi creates the resource under the default
 name, so only set these to customise:**
+
 - `WORKER_NAME` — default `potion`
 - `D1_DATABASE_NAME` — default `${WORKER_NAME}-db`
 - `R2_BUCKET_NAME` — assets bucket, default `${WORKER_NAME}-assets`
@@ -239,10 +264,12 @@ name, so only set these to customise:**
   bootstrap step, not `pulumi up` — see Setup / bootstrap)
 - `CLOUDFLARE_ZONE_ID` — derived from `APP_DOMAIN` via a zone lookup if omitted
 
-**Optional — OAuth (a provider is enabled only if its id *and* secret are set):**
+**Optional — OAuth (a provider is enabled only if its id _and_ secret are set):**
+
 - `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID`
 
 ### GitHub Actions secrets (sensitive)
+
 - `CLOUDFLARE_API_TOKEN` — provision + deploy
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — S3-compatible creds for the Pulumi
   R2 state backend (`https://<account>.r2.cloudflarestorage.com`)
@@ -251,6 +278,7 @@ name, so only set these to customise:**
 - `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`
 
 ### Pulumi pipeline (on push to main)
+
 - Build the app → run D1 migrations (`wrangler d1 migrations apply`) → `pulumi up`.
 - **Pulumi creates** (using the default or overridden names): the D1 database, the
   R2 assets bucket, the page Durable Object namespace + migration, and the Worker;
@@ -262,8 +290,10 @@ name, so only set these to customise:**
   defaults) — never literals in the repo.
 
 ### Setup / bootstrap
+
 Ship a `scripts/setup.sh` (or `bun scripts/setup.ts`) so a self-hoster configures a
 fork in one run. It should:
+
 - Check `wrangler` + `gh` are installed and authenticated (`wrangler whoami`,
   `gh auth status`).
 - Generate the two stable secrets: `BETTER_AUTH_SECRET`
@@ -283,7 +313,9 @@ Everything else — D1 DB, assets bucket, Worker, DO, custom domain — is creat
 to walk the user through the manual dashboard token steps interactively.
 
 ### README
+
 The README must clearly document self-hosting so anyone can deploy their own copy:
+
 - **Prerequisites**: a Cloudflare account + API token, and a domain/zone on
   Cloudflare.
 - **Quick path**: fork → run `scripts/setup.sh` → push to `main`. The script
@@ -294,7 +326,7 @@ The README must clearly document self-hosting so anyone can deploy their own cop
   it — so users who skip the script can set them by hand in repo settings.
 - A note that OAuth providers are optional (only enabled when their id + secret
   are set) and which redirect URIs to register (`https://$APP_DOMAIN/api/auth/
-  callback/{google,github}`).
+callback/{google,github}`).
 
 ## Database schema
 
@@ -303,6 +335,7 @@ app row is scoped to an `organization`; by default any member of the org has ful
 access to that org's content (enforced in middleware).
 
 ### Design principles
+
 - **Block-based like Notion.** A `page` is a node in a tree; its body is an
   ordered list of `block`s that can nest arbitrarily (toggles, columns, list
   items). Text blocks store **markdown** in `block.content`; type-specific config
@@ -320,7 +353,7 @@ access to that org's content (enforced in middleware).
   concurrent inserts at the same slot.
 - **Realtime editing model.** Default to **block-level last-write-wins**: the DO
   per page holds live state + broadcasts changes; `version` integer columns give
-  optimistic concurrency against D1 (the source of truth). This clobbers *intra*-
+  optimistic concurrency against D1 (the source of truth). This clobbers _intra_-
   block concurrent edits, which is acceptable for an MVP. If character-level
   co-editing is needed later, switch that block/page to a CRDT (Yjs) and persist
   its snapshot in a blob (`page.ydocState` or a `documentUpdate` log table),
@@ -334,18 +367,21 @@ access to that org's content (enforced in middleware).
   plugin as a fallback for headless clients — no other schema-specific tables needed.
 
 ### Auth tables — generated by better-auth, do not hand-author
+
 better-auth owns its schema. Run `npx @better-auth/cli@latest generate` after
 configuring `src/lib/auth.ts` (email/password + Google/GitHub + `organization`
 plugin + `drizzleAdapter`) to emit the Drizzle tables. Generate them into their
 own file (e.g. `src/lib/db/auth.schema.ts`) so regenerating never clobbers the
 hand-written app tables; `schema.ts` re-exports from it so there's still a single
 import surface. The generated set is, for reference only (FK targets used below):
+
 - core: **user**, **session** (incl. `activeOrganizationId`), **account**,
   **verification**
 - organization plugin: **organization**, **member** (role — `viewer` = read-only),
   **invitation** (role, status, expiresAt, inviterId)
 
 ### App tables
+
 - **page** — id, organizationId→organization, `parentPageId`→page (self, tree
   nesting), title, icon, coverImageKey (R2), position (fractional), isArchived +
   archivedAt (trash), createdByUserId, lastEditedByUserId, version, timestamps
@@ -377,26 +413,30 @@ import surface. The generated set is, for reference only (FK targets used below)
   distinct, so a nullable column would let duplicate grants through the unique index.
 
 ### Column/field types for collections (customisable tables)
+
 text · number · select · multi_select · date · checkbox · person · url · email ·
 files · relation · rollup — stored in `collection.schema`; each row's `values`
 are keyed by field id.
+
 - `relation`/`rollup` link rows across collections. Values are arrays of row ids
   in the JSON `values` (no migration needed), but that has **no referential
   integrity**; if integrity/queryability matters, add a `collectionRowRelation`
   join table later.
 
 ### Indexing & querying notes
+
 - Because `collectionRow.values` is opaque JSON, server-side filter/sort uses
   `json_extract(values, '$.<fieldId>')`, which **can't use a normal index**. Fine
   at small scale; for hot fields add SQLite **generated columns + expression
   indexes**. (Same blob-of-properties tradeoff Notion itself makes.)
 - Composite indexes should include `position` for the ordered-list queries, e.g.
   `block(pageId, parentBlockId, position)`, `page(organizationId, parentPageId,
-  position)`, `collectionRow(collectionId, position)`.
+position)`, `collectionRow(collectionId, position)`.
 - D1 enforces foreign keys, so the `onDelete: cascade`/`set null` rules above do
   the cleanup; deletes cascade page→blocks→(collections, comments) etc.
 
 ### Files & migrations
+
 - `src/lib/db/auth.schema.ts` — **generated** by `@better-auth/cli generate`
   (auth tables); never hand-edit
 - `src/lib/db/schema.ts` — hand-written app tables + relations, re-exports the

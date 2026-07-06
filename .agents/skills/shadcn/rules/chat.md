@@ -55,9 +55,9 @@ track visibility, and jump to it. `MessageScrollerButton` sits inside
           <MessageScrollerItem
             key={message.id}
             messageId={message.id}
-            scrollAnchor={message.role === "user"}
+            scrollAnchor={message.role === 'user'}
           >
-            <Message align={message.role === "user" ? "end" : "start"}>
+            <Message align={message.role === 'user' ? 'end' : 'start'}>
               {/* ...message content... */}
             </Message>
           </MessageScrollerItem>
