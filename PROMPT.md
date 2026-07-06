@@ -31,6 +31,9 @@ const createPostSchema = z.object({
 
 ## Functions
 - Use Tanstack Router createServerFn where possible, avoid creating REST API endpoints. Make sure all functions have the correct logging, auth and schema validation middleware.
+- **Logging**: a logging middleware emits one structured **wide/canonical event
+  per request** (requestId, userId, orgId, route, input summary, outcome,
+  duration) so requests are debuggable and queryable via Workers observability.
 
 ```typescript
 export const createPost = createServerFn({ method: "POST" })
@@ -72,9 +75,12 @@ navigate({ search: (prev) => ({ ...prev, view: 'kanban' }) })
   navigation so links stay consistent.
 
 ## Data fetching (queries & mutations)
-- **All server reads go through TanStack Query** (`useQuery` / `useSuspenseQuery`)
-  and **all writes through `useMutation`**. No raw `fetch`, no `useEffect` data
-  loading — every server function is called via Query.
+- **All server reads go through TanStack Query** (`useQuery` / `useSuspenseQuery`).
+  No raw `fetch`, no `useEffect` data loading — every server function read is
+  called via Query.
+- **Writes split by the write-path boundary** (see Realtime → Write path): non-hot
+  CRUD goes through `useMutation` → server function; hot collaborative edits go
+  over the WebSocket to the page DO. Never write the same row from both.
 - Wrap each server function in a shared `queryOptions` factory (co-located with
   the function) so routes and components share the same keys and types:
 
@@ -105,6 +111,14 @@ The app is **fully realtime** — every page edit propagates live to all viewers
 - **Broadcast on change**: block create/edit/move/delete and collection row
   changes are sent to the DO, applied to its live state, and broadcast to all
   other connected clients (block-level last-write-wins; `version` for OCC).
+- **Write path — one writer per row.** Hot collaborative edits (block
+  content/type, block & row create/move/delete, presence) go **client → WebSocket
+  → DO**, and the DO is the **sole D1 writer** for those rows (apply in memory →
+  broadcast → debounced flush). Everything else (create/rename/archive page,
+  collections + fields/views, comments, invites, permission changes) goes through
+  **server functions + TanStack Query mutations** and writes D1 directly; those
+  may *notify* the page DO to broadcast an invalidation, but must never
+  double-write a row the DO owns.
 - **Presence**: the DO tracks connected users + live cursors/selection and
   broadcasts join/leave/cursor events. Presence is ephemeral — never persisted
   to D1.
@@ -158,6 +172,13 @@ the interface.
   browse addressable content.
 - **Schemas**: reuse each server function's Zod input/output schema as the MCP
   tool schema.
+
+## Search
+- Global search over page titles + block content (Notion-style quick-find; also
+  backs the MCP `search pages` tool).
+- Use SQLite **FTS5** virtual table(s) synced from `page`/`block`, scoped by org
+  and gated by the same permission checks as everywhere else. Keep the index
+  updated at the write points (the DO flush + CRUD mutations).
 
 ## UI
 - Use **shadcn/ui** components wherever possible instead of hand-rolling UI
