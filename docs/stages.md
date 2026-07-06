@@ -65,7 +65,7 @@ Done when:
 
 ## Stage 5 - MCP And Realtime Write Path
 
-Status: queued
+Status: done
 
 Goal: connect remote tools and collaborative document writes safely.
 

@@ -62,6 +62,48 @@ test.describe('workspace', () => {
     await expect(page.getByText('Data model and migrations')).toHaveCount(0)
     await expect(page.getByText('Private chat import flow')).toBeVisible()
 
+    const mcpStatus = await page.request.get('/mcp')
+    expect(mcpStatus.ok()).toBe(true)
+    await expect(mcpStatus.json()).resolves.toMatchObject({
+      status: 'ready',
+      tools: expect.arrayContaining([
+        expect.objectContaining({ name: 'search_pages' }),
+      ]),
+    })
+
+    const mcpSearch = await page.request.post('/mcp', {
+      data: {
+        jsonrpc: '2.0',
+        id: 'search',
+        method: 'tools/call',
+        params: {
+          name: 'search_pages',
+          arguments: { query: 'deploy' },
+        },
+      },
+    })
+    expect(mcpSearch.ok()).toBe(true)
+    await expect(mcpSearch.json()).resolves.toMatchObject({
+      result: {
+        structuredContent: {
+          pages: [
+            expect.objectContaining({
+              slug: 'deployment-handoff',
+            }),
+          ],
+        },
+      },
+    })
+
+    const realtimeStatus = await page.request.get(
+      '/api/realtime/pages/page_private_workspace',
+    )
+    expect(realtimeStatus.status()).toBe(426)
+    await expect(realtimeStatus.json()).resolves.toMatchObject({
+      status: 'websocket-required',
+      pageId: 'page_private_workspace',
+    })
+
     await page.goto('/pages/not-real?view=table')
     await expect(page.getByText('Page unavailable')).toBeVisible()
     await expect(

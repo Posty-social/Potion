@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PagesPageSlugRouteImport } from './routes/pages/$pageSlug'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiRealtimePagesPageIdRouteImport } from './routes/api/realtime/pages/$pageId'
 
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
@@ -40,6 +41,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRealtimePagesPageIdRoute = ApiRealtimePagesPageIdRouteImport.update({
+  id: '/api/realtime/pages/$pageId',
+  path: '/api/realtime/pages/$pageId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/mcp': typeof McpRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/mcp': typeof McpRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,33 @@ export interface FileRoutesById {
   '/mcp': typeof McpRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/mcp' | '/pages/$pageSlug' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/mcp'
+    | '/pages/$pageSlug'
+    | '/api/auth/$'
+    | '/api/realtime/pages/$pageId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/mcp' | '/pages/$pageSlug' | '/api/auth/$'
-  id: '__root__' | '/' | '/login' | '/mcp' | '/pages/$pageSlug' | '/api/auth/$'
+  to:
+    | '/'
+    | '/login'
+    | '/mcp'
+    | '/pages/$pageSlug'
+    | '/api/auth/$'
+    | '/api/realtime/pages/$pageId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/mcp'
+    | '/pages/$pageSlug'
+    | '/api/auth/$'
+    | '/api/realtime/pages/$pageId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +105,7 @@ export interface RootRouteChildren {
   McpRoute: typeof McpRoute
   PagesPageSlugRoute: typeof PagesPageSlugRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiRealtimePagesPageIdRoute: typeof ApiRealtimePagesPageIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/realtime/pages/$pageId': {
+      id: '/api/realtime/pages/$pageId'
+      path: '/api/realtime/pages/$pageId'
+      fullPath: '/api/realtime/pages/$pageId'
+      preLoaderRoute: typeof ApiRealtimePagesPageIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   McpRoute: McpRoute,
   PagesPageSlugRoute: PagesPageSlugRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiRealtimePagesPageIdRoute: ApiRealtimePagesPageIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

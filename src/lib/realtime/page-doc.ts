@@ -1,14 +1,10 @@
-export type PageDocSocketMessage = {
-  type:
-    | 'presence'
-    | 'block:update'
-    | 'block:create'
-    | 'block:delete'
-    | 'row:update'
-  pageId: string
-  clientId: string
-  payload: Record<string, unknown>
-}
+import {
+  canBroadcastPageDocMessage,
+  createPageDocBroadcast,
+  createPageDocSessionFromHeaders,
+  parsePageDocSocketMessage,
+  type PageDocSession,
+} from './messages'
 
 export class PageDoc implements DurableObject {
   constructor(private readonly state: DurableObjectState) {}
@@ -18,9 +14,16 @@ export class PageDoc implements DurableObject {
       return new Response('Expected WebSocket upgrade', { status: 426 })
     }
 
+    const session = createPageDocSessionFromHeaders(request.headers)
+
+    if (!session) {
+      return new Response('Missing realtime session', { status: 401 })
+    }
+
     const pair = new WebSocketPair()
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
+    server.serializeAttachment(session)
     this.state.acceptWebSocket(server)
 
     return new Response(null, {
@@ -33,11 +36,38 @@ export class PageDoc implements DurableObject {
     webSocket: WebSocket,
     message: string | ArrayBuffer,
   ): Promise<void> {
-    const payload =
-      typeof message === 'string' ? message : new TextDecoder().decode(message)
+    const session = webSocket.deserializeAttachment() as PageDocSession | null
+    const parsed = parsePageDocSocketMessage(message)
+
+    if (!session || !parsed.success) {
+      webSocket.send(
+        JSON.stringify({
+          type: 'error',
+          reason: 'invalid_realtime_message',
+        }),
+      )
+
+      return
+    }
+
+    if (!canBroadcastPageDocMessage(session, parsed.data)) {
+      webSocket.send(
+        JSON.stringify({
+          type: 'error',
+          reason: 'unauthorized_realtime_message',
+        }),
+      )
+
+      return
+    }
+
+    const payload = JSON.stringify(createPageDocBroadcast(session, parsed.data))
 
     for (const socket of this.state.getWebSockets()) {
-      if (socket !== webSocket) {
+      const socketSession =
+        socket.deserializeAttachment() as PageDocSession | null
+
+      if (socket !== webSocket && socketSession?.pageId === session.pageId) {
         socket.send(payload)
       }
     }
