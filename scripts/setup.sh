@@ -94,7 +94,6 @@ DETECTED_ACCOUNT="$($WRANGLER whoami 2>/dev/null | grep -oiE '[0-9a-f]{32}' | he
 ask CLOUDFLARE_ACCOUNT_ID "Cloudflare account ID" "$DETECTED_ACCOUNT"
 [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && die "Account ID is required."
 export CLOUDFLARE_ACCOUNT_ID
-ask CLOUDFLARE_ZONE_ID "Cloudflare zone ID (blank = derive from domain at deploy)" ""
 echo
 
 bold "3. OAuth providers (optional — press Enter to skip)"
@@ -104,6 +103,23 @@ GOOGLE_CLIENT_SECRET=""
 ask GITHUB_CLIENT_ID "GitHub client ID" ""
 GITHUB_CLIENT_SECRET=""
 [ -n "$GITHUB_CLIENT_ID" ] && ask_secret GITHUB_CLIENT_SECRET "GitHub client secret"
+echo
+
+bold "4. Cloudflare Zero Trust (optional — press Enter to skip)"
+info "If set, the deployed app is placed behind Cloudflare Access and only"
+info "these emails can reach it. Requires the API token to also have the"
+info "'Access: Apps and Policies — Edit' account permission."
+ask ZERO_TRUST_EMAILS "Allowed emails, comma-separated (e.g. you@example.com)" ""
+if [ -n "$ZERO_TRUST_EMAILS" ]; then
+  IFS=',' read -ra ZT_ENTRIES <<< "$ZERO_TRUST_EMAILS"
+  for entry in "${ZT_ENTRIES[@]}"; do
+    trimmed="$(printf '%s' "$entry" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    case "$trimmed" in
+      *@*.*) : ;;
+      *) die "ZERO_TRUST_EMAILS entry doesn't look like an email: '$trimmed'" ;;
+    esac
+  done
+fi
 echo
 
 # ---- generated, stable secrets -------------------------------------------------
@@ -119,7 +135,7 @@ info "D1_DATABASE_NAME     $D1_DATABASE_NAME       (Pulumi creates)"
 info "R2_BUCKET_NAME       $R2_BUCKET_NAME    (Pulumi creates)"
 info "PULUMI_STATE_BUCKET  $PULUMI_STATE_BUCKET (created now)"
 info "CLOUDFLARE_ACCOUNT_ID $CLOUDFLARE_ACCOUNT_ID"
-info "CLOUDFLARE_ZONE_ID   ${CLOUDFLARE_ZONE_ID:-<derive at deploy>}"
+info "ZERO_TRUST_EMAILS    ${ZERO_TRUST_EMAILS:-<disabled>}"
 info "Google OAuth         ${GOOGLE_CLIENT_ID:+configured}${GOOGLE_CLIENT_ID:-skipped}"
 info "GitHub OAuth         ${GITHUB_CLIENT_ID:+configured}${GITHUB_CLIENT_ID:-skipped}"
 info "BETTER_AUTH_SECRET / PULUMI_CONFIG_PASSPHRASE  generated"
