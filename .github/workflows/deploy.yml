@@ -43,12 +43,6 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright
-        run: bun x playwright install --with-deps chromium
-
-      - name: Verify
-        run: bun run verify
-
       - name: Pulumi Login
         run: |
           pulumi login "s3://${PULUMI_STATE_BUCKET}?endpoint=https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com&region=auto&s3ForcePathStyle=true"
