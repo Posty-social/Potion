@@ -7,7 +7,7 @@ import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { authClient } from '#/lib/auth-client'
 import { getEnabledSocialProviders } from '#/lib/auth.functions'
-import { getWorkspaceAccess } from '#/lib/workspace/access.functions'
+import { workspaceAccessQuery } from '#/lib/workspace/access.functions'
 
 const loginSearchSchema = z.object({
   redirect: z.string().optional(),
@@ -15,8 +15,10 @@ const loginSearchSchema = z.object({
 
 export const Route = createFileRoute('/login')({
   validateSearch: loginSearchSchema,
-  beforeLoad: async ({ search }) => {
-    const access = await getWorkspaceAccess()
+  beforeLoad: async ({ context, search }) => {
+    const access = await context.queryClient.ensureQueryData(
+      workspaceAccessQuery(),
+    )
 
     if (access.user) {
       throw redirect({ href: search.redirect ?? '/' })

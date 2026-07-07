@@ -57,15 +57,7 @@ export const listWorkspacePages = createServerFn({ method: 'GET' }).handler(
 
 export const getWorkspacePage = createServerFn({ method: 'GET' })
   .validator(getPageSchema)
-  .handler(async ({ data }) => {
-    const page = await (await requireRepository()).getPage(data.slug)
-
-    if (!page) {
-      throw new Error('Page not found')
-    }
-
-    return page
-  })
+  .handler(async ({ data }) => (await requireRepository()).getPage(data.slug))
 
 export const ensureWorkspaceSeed = createServerFn({ method: 'GET' }).handler(
   async () => {

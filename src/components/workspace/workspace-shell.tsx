@@ -59,6 +59,7 @@ import {
   useWorkspaceMutations,
   type WorkspaceMutations,
 } from './use-workspace-mutations'
+import { WorkspaceSwitcher } from './workspace-switcher'
 
 type WorkspaceShellProps = {
   page: WorkspacePage
@@ -72,7 +73,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
   const createTopLevelPage = async () => {
     const summary = await mutations.createPage({ title: 'Untitled' })
     await navigate({
-      to: '/pages/$pageSlug',
+      to: '/p/$pageSlug',
       params: { pageSlug: summary.slug },
     })
   }
@@ -83,7 +84,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
       parentPageId,
     })
     await navigate({
-      to: '/pages/$pageSlug',
+      to: '/p/$pageSlug',
       params: { pageSlug: summary.slug },
     })
   }
@@ -163,12 +164,7 @@ function Sidebar({
 
   return (
     <aside className="hidden min-h-screen flex-col bg-[var(--workspace-side)] lg:flex">
-      <div className="flex items-center gap-2 px-3 py-3">
-        <div className="flex size-7 items-center justify-center rounded-md bg-[var(--accent-plum)] text-sm font-bold text-white">
-          P
-        </div>
-        <span className="text-sm font-semibold">Potion</span>
-      </div>
+      <WorkspaceSwitcher />
 
       <div className="px-3 pb-2">
         <div className="relative">
@@ -188,7 +184,7 @@ function Sidebar({
             {filtered.map((page) => (
               <Link
                 key={page.id}
-                to="/pages/$pageSlug"
+                to="/p/$pageSlug"
                 params={{ pageSlug: page.slug }}
                 className={cn(
                   'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--workspace-ink-soft)] no-underline hover:bg-[var(--workspace-hover)]',
@@ -363,7 +359,7 @@ function PageTreeNode({
           />
         </button>
         <Link
-          to="/pages/$pageSlug"
+          to="/p/$pageSlug"
           params={{ pageSlug: page.slug }}
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-sm text-[var(--workspace-ink-soft)] no-underline',
@@ -416,7 +412,7 @@ function PageHeader({
         {page.ancestors.map((ancestor) => (
           <span key={ancestor.id} className="flex items-center gap-1">
             <Link
-              to="/pages/$pageSlug"
+              to="/p/$pageSlug"
               params={{ pageSlug: ancestor.slug }}
               className="flex items-center gap-1 truncate text-[var(--workspace-ink-soft)] no-underline hover:text-[var(--workspace-ink)]"
             >
@@ -835,7 +831,7 @@ function ChildPages({
           {page.childPages.map((child) => (
             <Link
               key={child.id}
-              to="/pages/$pageSlug"
+              to="/p/$pageSlug"
               params={{ pageSlug: child.slug }}
               className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm no-underline hover:bg-[var(--workspace-hover)]"
             >

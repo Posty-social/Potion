@@ -9,15 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as PagesPageSlugRouteImport } from './routes/pages/$pageSlug'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsMembersRouteImport } from './routes/settings.members'
+import { Route as PPageSlugRouteImport } from './routes/p/$pageSlug'
+import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known.oauth-protected-resource'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiRealtimePagesPageIdRouteImport } from './routes/api/realtime/pages/$pageId'
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -33,11 +42,27 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PagesPageSlugRoute = PagesPageSlugRouteImport.update({
-  id: '/pages/$pageSlug',
-  path: '/pages/$pageSlug',
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMembersRoute = SettingsMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const PPageSlugRoute = PPageSlugRouteImport.update({
+  id: '/p/$pageSlug',
+  path: '/p/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AcceptInvitationInvitationIdRoute =
+  AcceptInvitationInvitationIdRouteImport.update({
+    id: '/accept-invitation/$invitationId',
+    path: '/accept-invitation/$invitationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DotwellKnownOauthProtectedResourceRoute =
   DotwellKnownOauthProtectedResourceRouteImport.update({
     id: '/.well-known/oauth-protected-resource',
@@ -65,9 +90,13 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
-  '/pages/$pageSlug': typeof PagesPageSlugRoute
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/members': typeof SettingsMembersRoute
+  '/settings/': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
@@ -77,7 +106,10 @@ export interface FileRoutesByTo {
   '/mcp': typeof McpRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
-  '/pages/$pageSlug': typeof PagesPageSlugRoute
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/members': typeof SettingsMembersRoute
+  '/settings': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
@@ -86,9 +118,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
-  '/pages/$pageSlug': typeof PagesPageSlugRoute
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/members': typeof SettingsMembersRoute
+  '/settings/': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
 }
@@ -98,9 +134,13 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/mcp'
+    | '/settings'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
-    | '/pages/$pageSlug'
+    | '/accept-invitation/$invitationId'
+    | '/p/$pageSlug'
+    | '/settings/members'
+    | '/settings/'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
   fileRoutesByTo: FileRoutesByTo
@@ -110,7 +150,10 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
-    | '/pages/$pageSlug'
+    | '/accept-invitation/$invitationId'
+    | '/p/$pageSlug'
+    | '/settings/members'
+    | '/settings'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
   id:
@@ -118,9 +161,13 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/mcp'
+    | '/settings'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
-    | '/pages/$pageSlug'
+    | '/accept-invitation/$invitationId'
+    | '/p/$pageSlug'
+    | '/settings/members'
+    | '/settings/'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
   fileRoutesById: FileRoutesById
@@ -129,15 +176,24 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRoute
-  PagesPageSlugRoute: typeof PagesPageSlugRoute
+  AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
+  PPageSlugRoute: typeof PPageSlugRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiRealtimePagesPageIdRoute: typeof ApiRealtimePagesPageIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -159,11 +215,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pages/$pageSlug': {
-      id: '/pages/$pageSlug'
-      path: '/pages/$pageSlug'
-      fullPath: '/pages/$pageSlug'
-      preLoaderRoute: typeof PagesPageSlugRouteImport
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/members': {
+      id: '/settings/members'
+      path: '/members'
+      fullPath: '/settings/members'
+      preLoaderRoute: typeof SettingsMembersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/p/$pageSlug': {
+      id: '/p/$pageSlug'
+      path: '/p/$pageSlug'
+      fullPath: '/p/$pageSlug'
+      preLoaderRoute: typeof PPageSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accept-invitation/$invitationId': {
+      id: '/accept-invitation/$invitationId'
+      path: '/accept-invitation/$invitationId'
+      fullPath: '/accept-invitation/$invitationId'
+      preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.well-known/oauth-protected-resource': {
@@ -197,15 +274,31 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsMembersRoute: typeof SettingsMembersRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsMembersRoute: SettingsMembersRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   McpRoute: McpRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   DotwellKnownOauthProtectedResourceRoute:
     DotwellKnownOauthProtectedResourceRoute,
-  PagesPageSlugRoute: PagesPageSlugRoute,
+  AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
+  PPageSlugRoute: PPageSlugRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiRealtimePagesPageIdRoute: ApiRealtimePagesPageIdRoute,
 }

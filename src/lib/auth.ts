@@ -7,7 +7,11 @@ import { eq } from 'drizzle-orm'
 
 import { db, getRuntimeEnv } from '#/lib/db/connection'
 import * as schema from '#/lib/db/schema'
-import { member, organization as organizationTable } from '#/lib/db/schema'
+import { member } from '#/lib/db/schema'
+import {
+  ensurePersonalWorkspace,
+  hasPendingInvitation,
+} from '#/lib/workspace/personal-workspace.server'
 
 const runtimeEnv = getRuntimeEnv()
 
@@ -66,15 +70,34 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  session: {
+    expiresIn: 60 * 60 * 24 * 30, // 30 days
+    updateAge: 60 * 60 * 24, // refresh session token daily
+    // Serve getSession from a signed cookie instead of hitting D1 on every
+    // server-function call. When the cache expires, Better Auth falls back
+    // to the database via the session_token cookie and re-sets the cache;
+    // sign-out and organization switches refresh it immediately.
+    cookieCache: {
+      enabled: true,
+      maxAge: 5 * 60,
+    },
+  },
   socialProviders,
   trustedOrigins,
   databaseHooks: {
     user: {
       create: {
-        // Give every new user a personal workspace organization so all of
-        // their pages have an owner to be scoped to.
+        // Give a new user their own personal workspace so their pages have an
+        // owner to be scoped to — UNLESS they're signing up in response to a
+        // pending invitation. In that case they'll join the inviting workspace
+        // when they accept (or get a personal workspace if they decline), so we
+        // avoid provisioning an orphaned personal workspace up front.
         after: async (createdUser) => {
-          await ensurePersonalOrganization(createdUser.id, {
+          if (await hasPendingInvitation(createdUser.email)) {
+            return
+          }
+
+          await ensurePersonalWorkspace(createdUser.id, {
             name: createdUser.name,
             email: createdUser.email,
           })
@@ -128,38 +151,6 @@ async function getPrimaryOrganizationId(
     .limit(1)
 
   return membership?.organizationId ?? null
-}
-
-async function ensurePersonalOrganization(
-  userId: string,
-  profile: { name?: string | null; email: string },
-): Promise<string> {
-  const existing = await getPrimaryOrganizationId(userId)
-
-  if (existing) {
-    return existing
-  }
-
-  const organizationId = crypto.randomUUID()
-  const displayName = profile.name?.trim() || profile.email.split('@')[0]
-  const now = new Date()
-
-  await db.insert(organizationTable).values({
-    id: organizationId,
-    name: `${displayName}'s workspace`,
-    slug: `w-${userId}`,
-    createdAt: now,
-  })
-
-  await db.insert(member).values({
-    id: crypto.randomUUID(),
-    organizationId,
-    userId,
-    role: 'owner',
-    createdAt: now,
-  })
-
-  return organizationId
 }
 
 function normalizeUrl(value?: string) {

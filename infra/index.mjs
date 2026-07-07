@@ -20,6 +20,9 @@ const r2BucketName = process.env.R2_BUCKET_NAME || `${workerName}-assets`
 const database = new cloudflare.D1Database('database', {
   accountId,
   name: d1DatabaseName,
+  // Serve reads from replicas near the worker; the app opens a D1 Session
+  // per request (src/server.ts) so reads stay monotonically consistent.
+  readReplication: { mode: 'auto' },
 })
 
 const assets = new cloudflare.R2Bucket('assets', {

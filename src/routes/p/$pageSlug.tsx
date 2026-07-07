@@ -8,32 +8,32 @@ import {
 
 import { Button } from '#/components/ui/button'
 import { WorkspaceShell } from '#/components/workspace/workspace-shell'
-import { getWorkspaceAccess } from '#/lib/workspace/access.functions'
+import { workspaceAccessQuery } from '#/lib/workspace/access.functions'
 import {
   workspacePageQuery,
   workspacePagesQuery,
 } from '#/lib/workspace/functions'
 
-export const Route = createFileRoute('/pages/$pageSlug')({
-  beforeLoad: async ({ location }) => {
-    const access = await getWorkspaceAccess()
+export const Route = createFileRoute('/p/$pageSlug')({
+  beforeLoad: async ({ context, location }) => {
+    const access = await context.queryClient.ensureQueryData(
+      workspaceAccessQuery(),
+    )
 
     if (!access.user) {
+      context.queryClient.removeQueries(workspaceAccessQuery())
       throw redirect({ to: '/login', search: { redirect: location.href } })
     }
   },
   loader: async ({ context, params }) => {
-    const pages = await context.queryClient.ensureQueryData(
-      workspacePagesQuery(),
-    )
+    const [page] = await Promise.all([
+      context.queryClient.ensureQueryData(workspacePageQuery(params.pageSlug)),
+      context.queryClient.ensureQueryData(workspacePagesQuery()),
+    ])
 
-    if (!pages.some((page) => page.slug === params.pageSlug)) {
+    if (!page) {
       throw notFound()
     }
-
-    await context.queryClient.ensureQueryData(
-      workspacePageQuery(params.pageSlug),
-    )
   },
   notFoundComponent: PageNotFound,
   component: PageRoute,
@@ -43,6 +43,12 @@ function PageRoute() {
   const { pageSlug } = Route.useParams()
   const { data: page } = useSuspenseQuery(workspacePageQuery(pageSlug))
   const { data: pages } = useSuspenseQuery(workspacePagesQuery())
+
+  // The loader throws notFound before this renders; this also covers a page
+  // deleted from under an open route by a mutation refetch.
+  if (!page) {
+    return <PageNotFound />
+  }
 
   return <WorkspaceShell page={page} pages={pages} />
 }
