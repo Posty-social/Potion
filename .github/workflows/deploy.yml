@@ -51,17 +51,19 @@ jobs:
         run: |
           pulumi stack select production --create --cwd infra
           pulumi up --yes --cwd infra
+          echo "D1_DATABASE_ID=$(pulumi stack output databaseId --cwd infra)" >> "$GITHUB_ENV"
 
-      - name: Apply D1 Migrations
-        run: bun run db:migrate:remote
-
-      # Rewrites wrangler.jsonc for production (custom domain on APP_DOMAIN,
-      # workers.dev disabled so Cloudflare Access cannot be bypassed, prod
-      # vars) and rebuilds so the vite plugin bakes it into the deploy output.
+      # Rewrites wrangler.jsonc for production (real D1 database id, custom
+      # domain on APP_DOMAIN, workers.dev disabled so Cloudflare Access cannot
+      # be bypassed, prod vars) and rebuilds so the vite plugin bakes it into
+      # the deploy output. Must run before migrations: they read this config.
       - name: Prepare Production Config
         run: |
           bun scripts/prepare-wrangler-deploy.mjs --write
           bun run build
+
+      - name: Apply D1 Migrations
+        run: bun run db:migrate:remote
 
       - name: Sync Worker Runtime Values
         run: |

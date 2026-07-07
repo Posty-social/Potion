@@ -119,6 +119,16 @@ if (process.env.WORKER_NAME) {
   config.name = process.env.WORKER_NAME
 }
 
+// Point the D1 binding at the real database Pulumi created (the checked-in
+// config holds a local-dev placeholder id). Both `wrangler d1 migrations
+// apply` and `wrangler deploy` read this.
+if (process.env.D1_DATABASE_ID) {
+  config.d1_databases[0].database_id = process.env.D1_DATABASE_ID
+}
+if (process.env.D1_DATABASE_NAME) {
+  config.d1_databases[0].database_name = process.env.D1_DATABASE_NAME
+}
+
 // Serve exclusively on the custom domain; Access protects this hostname.
 config.routes = [{ pattern: appDomain, custom_domain: true }]
 config.workers_dev = false
