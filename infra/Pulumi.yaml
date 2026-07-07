@@ -3,5 +3,5 @@ runtime:
   name: nodejs
   options:
     packagemanager: bun
-main: index.mjs
+main: index.ts
 description: Cloudflare resources for the self-hosted Potion workspace.

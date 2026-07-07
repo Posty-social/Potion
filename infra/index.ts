@@ -1,7 +1,7 @@
 import * as cloudflare from '@pulumi/cloudflare'
 import * as pulumi from '@pulumi/pulumi'
 
-function requiredEnv(name) {
+function requiredEnv(name: string): string {
   const value = process.env[name]
 
   if (!value) {
@@ -63,7 +63,11 @@ const zeroTrustEmails = (process.env.ZERO_TRUST_EMAILS ?? '')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean)
 
-let accessApplication
+// How long an Access login stays valid before re-authentication. Long-lived
+// (1 year) so allowed users rarely have to log in again at the edge.
+const accessSessionDuration = '8760h'
+
+let accessApplication: cloudflare.ZeroTrustAccessApplication | undefined
 
 if (zeroTrustEmails.length > 0) {
   const allowlist = new cloudflare.ZeroTrustAccessPolicy(
@@ -83,10 +87,45 @@ if (zeroTrustEmails.length > 0) {
       name: `${workerName} workspace`,
       domain: appDomain,
       type: 'self_hosted',
-      sessionDuration: '24h',
+      sessionDuration: accessSessionDuration,
       policies: [{ id: allowlist.id, precedence: 1 }],
     },
   )
+
+  // The MCP server and its OAuth handshake must be reachable by remote MCP
+  // clients, which can't complete Access's interactive browser login. Carve
+  // the MCP + OAuth endpoints out of Access with a public bypass — they stay
+  // protected by the app's own Better Auth OAuth (unauthenticated calls get
+  // 401). Cloudflare Access matches the most specific path, so this bypass
+  // wins for these paths while the rest of the domain stays gated.
+  const mcpBypass = new cloudflare.ZeroTrustAccessPolicy('mcp-public-bypass', {
+    accountId,
+    name: `${workerName} mcp public bypass`,
+    decision: 'bypass',
+    includes: [{ everyone: {} }],
+  })
+
+  new cloudflare.ZeroTrustAccessApplication('workspace-mcp-public', {
+    accountId,
+    name: `${workerName} mcp (public)`,
+    type: 'self_hosted',
+    sessionDuration: accessSessionDuration,
+    // Public destinations skip Access; paths support wildcards.
+    destinations: [
+      { type: 'public', uri: `${appDomain}/mcp` },
+      { type: 'public', uri: `${appDomain}/mcp/*` },
+      { type: 'public', uri: `${appDomain}/api/auth/mcp/*` },
+      {
+        type: 'public',
+        uri: `${appDomain}/.well-known/oauth-authorization-server`,
+      },
+      {
+        type: 'public',
+        uri: `${appDomain}/.well-known/oauth-protected-resource`,
+      },
+    ],
+    policies: [{ id: mcpBypass.id, precedence: 1 }],
+  })
 }
 
 export const databaseId = database.id
