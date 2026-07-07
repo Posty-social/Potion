@@ -44,6 +44,7 @@ import {
 import { Input } from '#/components/ui/input'
 import { authClient } from '#/lib/auth-client'
 import { cn } from '#/lib/utils'
+import { renderInline } from '#/lib/workspace/markdown'
 import { initialsFor } from '#/lib/workspace/types'
 import type {
   DatabaseViewType,
@@ -760,6 +761,7 @@ function BlockTextInput({
   placeholder?: string
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  const [editing, setEditing] = useState(false)
 
   const resize = () => {
     const el = ref.current
@@ -771,6 +773,37 @@ function BlockTextInput({
 
   useLayoutEffect(resize, [])
 
+  // On entering edit mode, focus the textarea and drop the caret at the end.
+  useEffect(() => {
+    const el = ref.current
+    if (editing && el) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+      resize()
+    }
+  }, [editing])
+
+  // Rendered (read) mode: show formatted Markdown until the user clicks in.
+  // Empty blocks skip this so the placeholder + caret are immediately usable.
+  if (!editing && block.content.trim() !== '') {
+    // The click target is a real, full-size overlay button. It can't wrap the
+    // content directly because the rendered Markdown may contain links, which
+    // are illegal descendants of a <button>.
+    return (
+      <div className="relative">
+        <div className={cn('whitespace-pre-wrap break-words', className)}>
+          {renderInline(block.content)}
+        </div>
+        <button
+          type="button"
+          aria-label="Edit text"
+          onClick={() => setEditing(true)}
+          className="absolute inset-0 size-full cursor-text"
+        />
+      </div>
+    )
+  }
+
   return (
     <textarea
       ref={ref}
@@ -781,6 +814,7 @@ function BlockTextInput({
       onInput={resize}
       onBlur={(event) => {
         const value = event.target.value
+        setEditing(false)
         if (value !== block.content) {
           void mutations
             .updateBlock({

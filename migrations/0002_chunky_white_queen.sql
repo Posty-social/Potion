@@ -1,0 +1,1 @@
+ALTER TABLE `collection_row` ADD `body` text;

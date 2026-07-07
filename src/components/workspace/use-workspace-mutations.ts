@@ -29,6 +29,7 @@ import {
   updateWorkspaceBlock,
   updateWorkspaceProperty,
   updateWorkspaceRow,
+  updateWorkspaceRowBody,
 } from '#/lib/workspace/functions'
 import type {
   CellValue,
@@ -163,6 +164,8 @@ export function useWorkspaceMutations() {
         rowId: string
         values: Record<string, CellValue>
       }) => run(updateWorkspaceRow({ data: input })),
+      updateRowBody: (input: { rowId: string; body: string }) =>
+        run(updateWorkspaceRowBody({ data: input })),
       deleteRow: (input: { rowId: string }) =>
         run(deleteWorkspaceRow({ data: input })),
     }

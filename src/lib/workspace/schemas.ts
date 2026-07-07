@@ -39,6 +39,10 @@ export const propertyTypeSchema = z.enum([
   'person',
   'checkbox',
   'url',
+  'email',
+  'phone',
+  'created_time',
+  'last_edited_time',
 ])
 
 export const viewTypeSchema = z.enum([
@@ -48,6 +52,8 @@ export const viewTypeSchema = z.enum([
   'gallery',
   'calendar',
 ])
+
+export const sortDirectionSchema = z.enum(['asc', 'desc'])
 
 export const cellValueSchema = z.union([
   z.string(),
@@ -132,9 +138,7 @@ export const setViewDatePropertySchema = z.object({
 })
 export const setViewSortsSchema = z.object({
   viewId: id,
-  sorts: z.array(
-    z.object({ propertyId: id, direction: z.enum(['asc', 'desc']) }),
-  ),
+  sorts: z.array(z.object({ propertyId: id, direction: sortDirectionSchema })),
 })
 export const setViewFiltersSchema = z.object({
   viewId: id,
@@ -183,6 +187,10 @@ export const addRowSchema = z.object({
   values: cellValuesSchema.optional(),
 })
 export const updateRowSchema = z.object({ rowId: id, values: cellValuesSchema })
+export const updateRowBodySchema = z.object({
+  rowId: id,
+  body: z.string().max(100_000),
+})
 export const deleteRowSchema = z.object({ rowId: id })
 
 // --- Import --------------------------------------------------------------

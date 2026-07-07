@@ -39,6 +39,7 @@ import {
   setViewTypeSchema,
   updateBlockSchema,
   updatePropertySchema,
+  updateRowBodySchema,
   updateRowSchema,
 } from './schemas'
 
@@ -199,6 +200,10 @@ export const addWorkspaceRow = createServerFn({ method: 'POST' })
 export const updateWorkspaceRow = createServerFn({ method: 'POST' })
   .validator(updateRowSchema)
   .handler(async ({ data }) => (await requireRepository()).updateRow(data))
+
+export const updateWorkspaceRowBody = createServerFn({ method: 'POST' })
+  .validator(updateRowBodySchema)
+  .handler(async ({ data }) => (await requireRepository()).updateRowBody(data))
 
 export const deleteWorkspaceRow = createServerFn({ method: 'POST' })
   .validator(deleteRowSchema)

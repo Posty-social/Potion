@@ -6,24 +6,44 @@ import {
 } from '@tanstack/react-table'
 import {
   ArrowDownUpIcon,
+  AtSignIcon,
   CalendarIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CircleDotIcon,
+  ClockIcon,
   GalleryVerticalEndIcon,
+  HashIcon,
+  HistoryIcon,
   KanbanSquareIcon,
+  LinkIcon,
   ListFilterIcon,
   ListIcon,
+  LoaderIcon,
   MaximizeIcon,
+  MenuIcon,
+  PhoneIcon,
   PlusIcon,
   Settings2Icon,
   SlidersHorizontalIcon,
+  SquareCheckIcon,
   Table2Icon,
+  TextIcon,
   Trash2Icon,
+  TypeIcon,
+  UsersIcon,
   XIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from 'react'
 
 import { Button } from '#/components/ui/button'
 import { Checkbox } from '#/components/ui/checkbox'
@@ -42,8 +62,11 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { Input } from '#/components/ui/input'
+import { Sheet, SheetContent, SheetTitle } from '#/components/ui/sheet'
 import { cn } from '#/lib/utils'
+import { Markdown } from '#/lib/workspace/markdown'
 import {
+  COMPUTED_PROPERTY_TYPES,
   OPTION_PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
   type CellValue,
@@ -90,6 +113,55 @@ const optionById = (property: DatabaseProperty, id: unknown) =>
   typeof id === 'string'
     ? property.options?.find((option) => option.id === id)
     : undefined
+
+const PROPERTY_TYPE_ICONS: Record<PropertyType, typeof TextIcon> = {
+  title: TypeIcon,
+  text: TextIcon,
+  number: HashIcon,
+  select: CircleDotIcon,
+  multi_select: ListIcon,
+  status: LoaderIcon,
+  date: CalendarIcon,
+  person: UsersIcon,
+  checkbox: SquareCheckIcon,
+  url: LinkIcon,
+  email: AtSignIcon,
+  phone: PhoneIcon,
+  created_time: ClockIcon,
+  last_edited_time: HistoryIcon,
+}
+
+function formatTimestamp(value: CellValue): string {
+  if (typeof value !== 'string' || !value) {
+    return ''
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * The value to show for a property on a row. Most come straight from the row's
+ * stored `values`; the computed types (created / last-edited time) are read off
+ * the row's own timestamps instead.
+ */
+function cellValueFor(property: DatabaseProperty, row: DatabaseRow): CellValue {
+  if (property.type === 'created_time') {
+    return row.createdAt
+  }
+  if (property.type === 'last_edited_time') {
+    return row.updatedAt
+  }
+  return row.values[property.id] ?? null
+}
 
 // --- filter / sort helpers ----------------------------------------------
 
@@ -252,12 +324,11 @@ export function DatabaseElement({ database, mutations }: Props) {
       )}
 
       {openRow ? (
-        <RowPeekDialog
+        <RowPeekPanel
           database={database}
           row={openRow}
           mutations={mutations}
           onClose={() => setOpenRowId(null)}
-          onConfigureOptions={setOptionsPropertyId}
         />
       ) : null}
 
@@ -876,6 +947,99 @@ function PropertiesMenu({
   )
 }
 
+/**
+ * Notion-style "new property" popover: a name field on top and a searchable,
+ * icon-labelled list of property types below. Adds the property to the database
+ * schema, so it shows up in every view and in the row peek's property list.
+ */
+function PropertyTypePicker({
+  databaseId,
+  mutations,
+  trigger,
+  align = 'start',
+  onCreated,
+}: {
+  databaseId: string
+  mutations: WorkspaceMutations
+  trigger: ReactNode
+  align?: 'start' | 'end'
+  onCreated?: (propertyId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      nameRef.current?.focus()
+    }
+  }, [open])
+
+  const reset = () => setName('')
+
+  const create = async (type: Exclude<PropertyType, 'title'>) => {
+    const result = await mutations.addProperty({
+      databaseId,
+      name: name.trim() || PROPERTY_TYPE_LABELS[type],
+      type,
+    })
+    setOpen(false)
+    reset()
+    onCreated?.(result.propertyId)
+  }
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) {
+          reset()
+        }
+      }}
+    >
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align={align} className="w-64 p-0">
+        <div className="flex items-center gap-1.5 border-b border-[var(--workspace-line)] p-2">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-[var(--workspace-line)] text-[var(--workspace-ink-soft)]">
+            <MenuIcon className="size-3.5" />
+          </span>
+          <input
+            ref={nameRef}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            placeholder="Property name"
+            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--accent-plum)] px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-plum)]/40"
+            aria-label="Property name"
+          />
+        </div>
+        <div className="p-1">
+          <p className="px-2 py-1 text-xs font-semibold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
+            Type
+          </p>
+          <div className="flex max-h-64 flex-col overflow-y-auto">
+            {ADDABLE_TYPES.map((type) => {
+              const Icon = PROPERTY_TYPE_ICONS[type]
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => void create(type)}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--workspace-hover)]"
+                >
+                  <Icon className="size-4 text-[var(--workspace-ink-soft)]" />
+                  {PROPERTY_TYPE_LABELS[type]}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function AddPropertyMenu({
   databaseId,
   mutations,
@@ -884,8 +1048,11 @@ function AddPropertyMenu({
   mutations: WorkspaceMutations
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <PropertyTypePicker
+      databaseId={databaseId}
+      mutations={mutations}
+      align="end"
+      trigger={
         <button
           type="button"
           className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-xs font-medium text-[var(--workspace-ink-soft)] transition-colors hover:bg-[var(--workspace-hover)]"
@@ -893,25 +1060,8 @@ function AddPropertyMenu({
           <PlusIcon className="size-3.5" />
           Property
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuLabel>New property</DropdownMenuLabel>
-        {ADDABLE_TYPES.map((type) => (
-          <DropdownMenuItem
-            key={type}
-            onClick={() =>
-              mutations.addProperty({
-                databaseId,
-                name: PROPERTY_TYPE_LABELS[type],
-                type,
-              })
-            }
-          >
-            {PROPERTY_TYPE_LABELS[type]}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+    />
   )
 }
 
@@ -1106,6 +1256,16 @@ function PropertyEditor({
   mutations: WorkspaceMutations
   onSave: (next: CellValue) => void
 }) {
+  // Computed, read-only properties derived from the row's own timestamps.
+  if (COMPUTED_PROPERTY_TYPES.includes(property.type)) {
+    const formatted = formatTimestamp(value)
+    return (
+      <div className="flex min-h-9 items-center px-3 text-sm text-[var(--workspace-ink-soft)]">
+        {formatted || <span className="text-[var(--workspace-line)]">—</span>}
+      </div>
+    )
+  }
+
   if (property.type === 'checkbox') {
     return (
       <div className="flex h-9 items-center px-3">
@@ -1138,7 +1298,11 @@ function PropertyEditor({
         ? 'date'
         : property.type === 'url'
           ? 'url'
-          : 'text'
+          : property.type === 'email'
+            ? 'email'
+            : property.type === 'phone'
+              ? 'tel'
+              : 'text'
 
   return (
     <input
@@ -1176,7 +1340,7 @@ function TableView({
   onConfigureOptions,
 }: SharedViewProps) {
   const columns = properties.map((property) =>
-    columnHelper.accessor((row) => row.values[property.id] ?? null, {
+    columnHelper.accessor((row) => cellValueFor(property, row), {
       id: property.id,
       header: () => (
         <PropertyHeader
@@ -2044,7 +2208,13 @@ function EmptyViewHint({
 
 // --- Row peek + options dialogs ------------------------------------------
 
-function RowPeekDialog({
+/**
+ * A database row opened "as a page" in a wide right-hand side panel — the same
+ * peek regardless of which view (table / board / list / gallery / calendar) it
+ * was opened from. Shows the title, the row's properties at the top (with an
+ * "Add a property" picker), then a Markdown body.
+ */
+function RowPeekPanel({
   database,
   row,
   mutations,
@@ -2054,63 +2224,163 @@ function RowPeekDialog({
   row: DatabaseRow
   mutations: WorkspaceMutations
   onClose: () => void
-  onConfigureOptions: (id: string) => void
 }) {
   const titleProperty = database.properties.find((p) => p.type === 'title')
   const titleValue = titleProperty ? row.values[titleProperty.id] : null
+  const otherProperties = database.properties.filter((p) => p.type !== 'title')
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
-            <input
-              key={`peek-title:${row.id}:${String(titleValue)}`}
-              defaultValue={typeof titleValue === 'string' ? titleValue : ''}
-              onBlur={(event) => {
-                if (titleProperty) {
-                  void mutations.updateRow({
-                    rowId: row.id,
-                    values: { [titleProperty.id]: event.target.value || null },
-                  })
-                }
-              }}
-              placeholder="Untitled"
-              className="w-full bg-transparent text-2xl font-bold outline-none"
-              aria-label="Row title"
-            />
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-1.5">
-          {database.properties
-            .filter((p) => p.type !== 'title')
-            .map((property) => (
-              <div
-                key={property.id}
-                className="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-2"
-              >
-                <span className="flex items-center gap-1.5 truncate text-xs font-semibold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
-                  {property.name}
-                </span>
-                <div className="rounded-md border border-[var(--workspace-line)]">
-                  <PropertyEditor
-                    property={property}
-                    value={row.values[property.id] ?? null}
-                    databaseId={database.id}
-                    mutations={mutations}
-                    onSave={(next) =>
-                      mutations.updateRow({
-                        rowId: row.id,
-                        values: { [property.id]: next },
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            ))}
+    <Sheet open onOpenChange={(open) => !open && onClose()}>
+      <SheetContent aria-describedby={undefined} className="gap-0 p-0">
+        <SheetTitle className="sr-only">
+          {typeof titleValue === 'string' && titleValue ? titleValue : 'Row'}
+        </SheetTitle>
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--workspace-line)] px-4 text-xs font-medium text-[var(--workspace-ink-soft)]">
+          <MaximizeIcon className="size-3.5" />
+          <span className="truncate">{database.title || 'Database'}</span>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 md:px-10">
+          <input
+            key={`peek-title:${row.id}:${String(titleValue)}`}
+            defaultValue={typeof titleValue === 'string' ? titleValue : ''}
+            onBlur={(event) => {
+              if (titleProperty) {
+                void mutations.updateRow({
+                  rowId: row.id,
+                  values: { [titleProperty.id]: event.target.value || null },
+                })
+              }
+            }}
+            placeholder="Untitled"
+            className="display-title mb-4 w-full bg-transparent text-3xl font-bold outline-none placeholder:text-[var(--workspace-line)]"
+            aria-label="Row title"
+          />
+
+          <div className="flex flex-col gap-1">
+            {otherProperties.map((property) => {
+              const Icon = PROPERTY_TYPE_ICONS[property.type]
+              return (
+                <div
+                  key={property.id}
+                  className="grid grid-cols-[minmax(0,160px)_minmax(0,1fr)] items-center gap-2"
+                >
+                  <span className="flex items-center gap-1.5 truncate py-1 text-sm text-[var(--workspace-ink-soft)]">
+                    <Icon className="size-4 shrink-0" />
+                    <span className="truncate">{property.name}</span>
+                  </span>
+                  <div className="rounded-md transition-colors hover:bg-[var(--workspace-muted)]">
+                    <PropertyEditor
+                      property={property}
+                      value={cellValueFor(property, row)}
+                      databaseId={database.id}
+                      mutations={mutations}
+                      onSave={(next) =>
+                        mutations.updateRow({
+                          rowId: row.id,
+                          values: { [property.id]: next },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              )
+            })}
+
+            <PropertyTypePicker
+              databaseId={database.id}
+              mutations={mutations}
+              trigger={
+                <button
+                  type="button"
+                  className="mt-1 flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-[var(--workspace-ink-soft)] transition-colors hover:bg-[var(--workspace-hover)]"
+                >
+                  <PlusIcon className="size-4" />
+                  Add a property
+                </button>
+              }
+            />
+          </div>
+
+          <hr className="my-5 border-[var(--workspace-line)]" />
+
+          <RowBodyEditor row={row} mutations={mutations} />
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+/**
+ * The row's page body: rendered Markdown that turns into a raw textarea on
+ * click. Bold, italics, lists, headings, links and code are all supported via
+ * Markdown syntax.
+ */
+function RowBodyEditor({
+  row,
+  mutations,
+}: {
+  row: DatabaseRow
+  mutations: WorkspaceMutations
+}) {
+  const [editing, setEditing] = useState(false)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const body = row.body ?? ''
+
+  const resize = () => {
+    const el = ref.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${Math.max(el.scrollHeight, 160)}px`
+    }
+  }
+
+  useEffect(() => {
+    const el = ref.current
+    if (editing && el) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+      resize()
+    }
+  }, [editing])
+
+  if (!editing && body.trim() !== '') {
+    // The click target is a real, full-size overlay button — the rendered
+    // Markdown body contains block-level elements that can't nest in a <button>.
+    return (
+      <div className="relative min-h-40">
+        <Markdown
+          text={body}
+          className="text-[0.95rem] leading-7 text-[var(--workspace-ink)]"
+        />
+        <button
+          type="button"
+          aria-label="Edit body"
+          onClick={() => setEditing(true)}
+          className="absolute inset-0 size-full cursor-text"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <textarea
+      ref={ref}
+      key={`body:${row.id}`}
+      defaultValue={body}
+      placeholder="Add notes, details, or a description… Markdown supported."
+      onInput={resize}
+      onBlur={(event) => {
+        const value = event.target.value
+        setEditing(false)
+        if (value !== body) {
+          void mutations
+            .updateRowBody({ rowId: row.id, body: value })
+            .catch(() => mutations.invalidate())
+        }
+      }}
+      className="min-h-40 w-full resize-none bg-transparent text-[0.95rem] leading-7 outline-none placeholder:text-[var(--workspace-line)]"
+    />
   )
 }
 

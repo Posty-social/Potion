@@ -335,6 +335,9 @@ export class WorkspaceRepository {
             id: row.id,
             position: row.position,
             values: (row.values ?? {}) as Record<string, CellValue>,
+            body: row.body ?? null,
+            createdAt: toIso(row.createdAt),
+            updatedAt: toIso(row.updatedAt),
             pageId: row.pageId ?? null,
           })),
           views: (viewsByDb.get(collection.id) ?? []).map((view) =>
@@ -995,6 +998,25 @@ export class WorkspaceRepository {
       .update(collectionRowTable)
       .set({
         values: merged as JsonRecord,
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(collectionRowTable.id, row.id))
+
+    return { ok: true }
+  }
+
+  async updateRowBody(input: {
+    rowId: string
+    body: string
+  }): Promise<{ ok: true }> {
+    const row = await this.assertRowInOrg(input.rowId)
+    const body = input.body.trim() ? input.body : null
+
+    await this.db
+      .update(collectionRowTable)
+      .set({
+        body,
         updatedAt: new Date(),
         lastEditedByUserId: this.ctx.userId,
       })

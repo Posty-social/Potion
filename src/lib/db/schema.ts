@@ -223,6 +223,9 @@ export const collectionRow = sqliteTable(
     values: jsonText<JsonRecord>('values')
       .notNull()
       .default(sql`'{}'`),
+    // Markdown body for the row's "page" — shown below its properties when the
+    // row is opened in the side peek. Null until the user writes something.
+    body: text('body'),
     position: text('position').notNull(),
     pageId: text('page_id').references(() => page.id, { onDelete: 'set null' }),
     createdByUserId: text('created_by_user_id')
