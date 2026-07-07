@@ -7,7 +7,7 @@
 # — D1, the assets bucket, the Worker, the Durable Object, the custom domain — is
 # created by `pulumi up` on the first deploy (push to main).
 #
-# Prereqs you must have ready (see .agents/skills/deploy-setup/SKILL.md):
+# Prereqs you must have ready (see .claude/skills/deploy-setup/SKILL.md):
 #   - gh, openssl, git, and wrangler (installed via `bun install`) on PATH
 #   - `gh auth login` completed
 #   - A Cloudflare API token, and R2 S3 access keys — both minted in the
@@ -163,7 +163,7 @@ set_var WORKER_NAME           "$WORKER_NAME"
 set_var D1_DATABASE_NAME      "$D1_DATABASE_NAME"
 set_var R2_BUCKET_NAME        "$R2_BUCKET_NAME"
 set_var PULUMI_STATE_BUCKET   "$PULUMI_STATE_BUCKET"
-[ -n "$CLOUDFLARE_ZONE_ID" ] && set_var CLOUDFLARE_ZONE_ID "$CLOUDFLARE_ZONE_ID"
+[ -n "$ZERO_TRUST_EMAILS" ]   && set_var ZERO_TRUST_EMAILS "$ZERO_TRUST_EMAILS"
 [ -n "$GOOGLE_CLIENT_ID" ]    && set_var GOOGLE_CLIENT_ID  "$GOOGLE_CLIENT_ID"
 [ -n "$GITHUB_CLIENT_ID" ]    && set_var GITHUB_CLIENT_ID  "$GITHUB_CLIENT_ID"
 
@@ -181,5 +181,11 @@ echo
 bold "Done. Next steps"
 [ -n "$GOOGLE_CLIENT_ID" ] && info "Google redirect URI:  https://$APP_DOMAIN/api/auth/callback/google"
 [ -n "$GITHUB_CLIENT_ID" ] && info "GitHub redirect URI:  https://$APP_DOMAIN/api/auth/callback/github"
+if [ -n "$ZERO_TRUST_EMAILS" ]; then
+  info "Zero Trust: enabled for $ZERO_TRUST_EMAILS"
+  info "  Disable later:  gh variable delete ZERO_TRUST_EMAILS --repo $REPO  (then redeploy)"
+else
+  info "Zero Trust: off. Enable later:  gh variable set ZERO_TRUST_EMAILS --repo $REPO --body 'you@example.com'  (then redeploy)"
+fi
 info "Deploy: push to main, or run  gh workflow run deploy.yml --repo $REPO"
 ok "Setup complete."

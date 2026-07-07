@@ -45,6 +45,7 @@ domain):
 - Account · **Workers Scripts** · Edit (Worker + Durable Object)
 - Account · **D1** · Edit
 - Account · **Workers R2 Storage** · Edit (create/manage buckets)
+- Account · **Access: Apps and Policies** · Edit (only if using `ZERO_TRUST_EMAILS`)
 - Zone · **Workers Routes** · Edit (custom domain)
 - Zone · **DNS** · Edit (custom domain record)
 
@@ -67,19 +68,27 @@ when both its id and secret are set.
 - **GitHub**: Settings → Developer settings → OAuth Apps. Callback URL:
   `https://<APP_DOMAIN>/api/auth/callback/github`
 
-## Step 4 — run the script
+## Step 4 — Cloudflare Zero Trust (optional)
+
+To gate the deployed app behind Cloudflare Access, provide a comma-separated
+email allowlist when the script prompts for `ZERO_TRUST_EMAILS`. Only those
+users can reach the app (Access is default-deny); everyone else is blocked at
+the edge before the Worker runs. Leave blank to skip. Toggle later by
+setting/deleting the `ZERO_TRUST_EMAILS` repo variable and redeploying.
+
+## Step 5 — run the script
 
 ```bash
 bash scripts/setup.sh
 ```
 
-It prompts for the domain, the credentials from steps 1–3, and (with a detected
+It prompts for the domain, the credentials from steps 1–4, and (with a detected
 default) the account id; generates `BETTER_AUTH_SECRET` + `PULUMI_CONFIG_PASSPHRASE`;
 creates the state bucket; and pushes everything to the repo. Resource names
 default from the worker name (`<worker>-db`, `<worker>-assets`,
 `<worker>-pulumi-state`) — accept the defaults unless the user wants custom names.
 
-## Step 5 — deploy
+## Step 6 — deploy
 
 Push to `main` (or `gh workflow run deploy.yml`) to trigger the pipeline, which
 runs D1 migrations and `pulumi up`, deploying to `https://<APP_DOMAIN>`.
@@ -88,7 +97,7 @@ runs D1 migrations and `pulumi up`, deploying to `https://<APP_DOMAIN>`.
 
 **Variables** (non-sensitive): `CLOUDFLARE_ACCOUNT_ID`, `APP_DOMAIN`,
 `WORKER_NAME`, `D1_DATABASE_NAME`, `R2_BUCKET_NAME`, `PULUMI_STATE_BUCKET`,
-optional `CLOUDFLARE_ZONE_ID` (derived from the domain if omitted),
+optional `ZERO_TRUST_EMAILS` (Cloudflare Access allowlist),
 optional `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID`.
 
 **Secrets** (sensitive): `CLOUDFLARE_API_TOKEN`, `R2_ACCESS_KEY_ID`,
