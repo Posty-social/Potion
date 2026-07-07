@@ -2,29 +2,92 @@ import { z } from 'zod'
 
 import { sanitizeImportedText } from './import'
 
-export const collectionViewSchema = z
-  .enum(['table', 'kanban', 'calendar', 'gallery', 'list'])
-  .catch('table')
-
 const importedTextSchema = (maxLength: number) =>
   z
     .string()
     .transform((value) => sanitizeImportedText(value))
     .pipe(z.string().min(1).max(maxLength))
 
-export const pageSearchSchema = z.object({
-  view: collectionViewSchema,
-  groupBy: z.string().optional(),
-  filter: z.string().optional(),
-  sort: z.string().optional(),
+const id = z.string().min(1).max(120)
+
+export const slugSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+
+export const blockTypeSchema = z.enum([
+  'paragraph',
+  'heading_1',
+  'heading_2',
+  'heading_3',
+  'to_do',
+  'quote',
+  'callout',
+  'divider',
+  'database',
+])
+
+// `title` is created implicitly with each database and can't be added/removed.
+export const propertyTypeSchema = z.enum([
+  'text',
+  'number',
+  'select',
+  'multi_select',
+  'status',
+  'date',
+  'person',
+  'checkbox',
+  'url',
+])
+
+export const viewTypeSchema = z.enum([
+  'table',
+  'board',
+  'list',
+  'gallery',
+  'calendar',
+])
+
+export const cellValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.array(z.string()),
+  z.null(),
+])
+
+export const cellValuesSchema = z.record(z.string(), cellValueSchema)
+
+// --- Page ----------------------------------------------------------------
+
+export const getPageSchema = z.object({ slug: slugSchema })
+
+export const createPageSchema = z.object({
+  title: z.string().min(1).max(120),
+  parentPageId: id.optional(),
 })
 
-export const getPageSchema = z.object({
-  slug: z
-    .string()
-    .min(1)
-    .max(80)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+export const renamePageSchema = z.object({
+  pageId: id,
+  title: z.string().min(1).max(120),
+})
+export const setPageIconSchema = z.object({
+  pageId: id,
+  icon: z.string().min(1).max(16),
+})
+export const deletePageSchema = z.object({ pageId: id })
+
+// --- Blocks --------------------------------------------------------------
+
+export const createBlockSchema = z.object({
+  pageId: id,
+  type: blockTypeSchema,
+  afterBlockId: id.optional(),
+  content: z.string().max(20_000).optional(),
+  databaseTitle: z.string().min(1).max(120).optional(),
+  // For database blocks: which view the new database opens in.
+  initialView: viewTypeSchema.optional(),
 })
 
 export const updateBlockSchema = z.object({
@@ -34,13 +97,103 @@ export const updateBlockSchema = z.object({
   version: z.number().int().min(1),
 })
 
-export const importPrivateChatSchema = z.object({
+export const setBlockCheckedSchema = z.object({
+  blockId: id,
+  checked: z.boolean(),
+})
+export const deleteBlockSchema = z.object({ blockId: id })
+
+// --- Database ------------------------------------------------------------
+
+export const renameDatabaseSchema = z.object({
+  databaseId: id,
+  title: z.string().min(1).max(120),
+})
+
+// Views
+export const addViewSchema = z.object({
+  databaseId: id,
+  type: viewTypeSchema,
+  name: z.string().min(1).max(80).optional(),
+})
+export const renameViewSchema = z.object({
+  viewId: id,
+  name: z.string().min(1).max(80),
+})
+export const deleteViewSchema = z.object({ viewId: id })
+export const setViewTypeSchema = z.object({ viewId: id, type: viewTypeSchema })
+export const setViewGroupBySchema = z.object({
+  viewId: id,
+  groupByPropertyId: id.nullable(),
+})
+export const setViewDatePropertySchema = z.object({
+  viewId: id,
+  datePropertyId: id.nullable(),
+})
+export const setViewSortsSchema = z.object({
+  viewId: id,
+  sorts: z.array(
+    z.object({ propertyId: id, direction: z.enum(['asc', 'desc']) }),
+  ),
+})
+export const setViewFiltersSchema = z.object({
+  viewId: id,
+  filters: z.array(z.object({ propertyId: id, value: z.string().max(200) })),
+})
+export const setViewPropertiesSchema = z.object({
+  viewId: id,
+  visiblePropertyIds: z.array(id).nullable(),
+})
+
+// Properties
+export const addPropertySchema = z.object({
+  databaseId: id,
+  name: z.string().min(1).max(80),
+  type: propertyTypeSchema,
+})
+export const updatePropertySchema = z.object({
+  databaseId: id,
+  propertyId: id,
+  name: z.string().min(1).max(80).optional(),
+  type: propertyTypeSchema.optional(),
+})
+export const deletePropertySchema = z.object({ databaseId: id, propertyId: id })
+
+// Property options (select / multi_select / status)
+export const addPropertyOptionSchema = z.object({
+  databaseId: id,
+  propertyId: id,
+  name: z.string().min(1).max(80),
+})
+export const renamePropertyOptionSchema = z.object({
+  databaseId: id,
+  propertyId: id,
+  optionId: id,
+  name: z.string().min(1).max(80),
+})
+export const deletePropertyOptionSchema = z.object({
+  databaseId: id,
+  propertyId: id,
+  optionId: id,
+})
+
+// Rows
+export const addRowSchema = z.object({
+  databaseId: id,
+  values: cellValuesSchema.optional(),
+})
+export const updateRowSchema = z.object({ rowId: id, values: cellValuesSchema })
+export const deleteRowSchema = z.object({ rowId: id })
+
+// --- Import --------------------------------------------------------------
+
+export const importTextSchema = z.object({
   title: importedTextSchema(120),
-  transcript: importedTextSchema(100_000),
+  body: importedTextSchema(100_000),
   source: importedTextSchema(120).optional(),
 })
 
-export type PageSearch = z.infer<typeof pageSearchSchema>
-export type CollectionView = z.infer<typeof collectionViewSchema>
+export type CreatePageInput = z.infer<typeof createPageSchema>
+export type CreateBlockInput = z.infer<typeof createBlockSchema>
 export type UpdateBlockInput = z.infer<typeof updateBlockSchema>
-export type ImportPrivateChatInput = z.infer<typeof importPrivateChatSchema>
+export type ImportTextInput = z.infer<typeof importTextSchema>

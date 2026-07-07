@@ -1,34 +1,38 @@
 import { z, ZodError } from 'zod'
 
 import {
-  WorkspaceAccessError,
-  requireWorkspaceAccess,
-  type WorkspaceAccess,
-} from '#/lib/workspace/access'
-import {
   WorkspaceRepositoryError,
-  workspaceRepository,
   type WorkspaceRepository,
 } from '#/lib/workspace/repository'
 import {
+  createBlockSchema,
+  createPageSchema,
   getPageSchema,
-  importPrivateChatSchema,
+  importTextSchema,
   updateBlockSchema,
 } from '#/lib/workspace/schemas'
+
+/** The subset of the repository the MCP tools depend on. */
+export type McpRepository = Pick<
+  WorkspaceRepository,
+  | 'listPages'
+  | 'getPage'
+  | 'createPage'
+  | 'createBlock'
+  | 'updateBlock'
+  | 'importText'
+>
 
 const mcpToolNames = [
   'search_pages',
   'read_page',
+  'create_page',
+  'append_block',
   'update_block',
-  'import_private_chat',
+  'import_text',
 ] as const
 
 export type McpToolName = (typeof mcpToolNames)[number]
-
-type McpToolContext = {
-  access: WorkspaceAccess
-  repository?: WorkspaceRepository
-}
 
 type McpToolResult = {
   content: Array<{ type: 'text'; text: string }>
@@ -64,24 +68,60 @@ const toolCallParamsSchema = z.object({
 export const mcpToolDefinitions = [
   {
     name: 'search_pages',
-    description: 'Search private workspace page summaries.',
+    description: 'Search the workspace pages you have access to.',
     inputSchema: {
       type: 'object',
-      properties: {
-        query: { type: 'string', maxLength: 120 },
-      },
+      properties: { query: { type: 'string', maxLength: 120 } },
       additionalProperties: false,
     },
   },
   {
     name: 'read_page',
-    description: 'Read a private workspace page by slug.',
+    description: 'Read a workspace page (blocks and collections) by slug.',
+    inputSchema: {
+      type: 'object',
+      properties: { slug: { type: 'string' } },
+      required: ['slug'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'create_page',
+    description: 'Create a new page, optionally nested under a parent page.',
     inputSchema: {
       type: 'object',
       properties: {
-        slug: { type: 'string' },
+        title: { type: 'string', maxLength: 120 },
+        parentPageId: { type: 'string' },
       },
-      required: ['slug'],
+      required: ['title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'append_block',
+    description: 'Append a block to the end of a page.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        type: {
+          type: 'string',
+          enum: [
+            'paragraph',
+            'heading_1',
+            'heading_2',
+            'heading_3',
+            'to_do',
+            'quote',
+            'callout',
+            'divider',
+            'database',
+          ],
+        },
+        content: { type: 'string', maxLength: 20_000 },
+      },
+      required: ['pageId', 'type'],
       additionalProperties: false,
     },
   },
@@ -101,16 +141,16 @@ export const mcpToolDefinitions = [
     },
   },
   {
-    name: 'import_private_chat',
-    description: 'Import sanitized private chat text as a private page.',
+    name: 'import_text',
+    description: 'Import sanitized text as a new page.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', maxLength: 120 },
-        transcript: { type: 'string', maxLength: 100_000 },
+        body: { type: 'string', maxLength: 100_000 },
         source: { type: 'string', maxLength: 120 },
       },
-      required: ['title', 'transcript'],
+      required: ['title', 'body'],
       additionalProperties: false,
     },
   },
@@ -120,15 +160,32 @@ export const mcpToolDefinitions = [
   inputSchema: Record<string, unknown>
 }>
 
+const serverInfo = {
+  name: 'Potion MCP',
+  version: '1.0.0',
+}
+
+export type McpRequestContext = {
+  repository: McpRepository | null
+}
+
 export async function resolveMcpHttpRequest(
   body: unknown,
-  context: McpToolContext,
+  context: McpRequestContext,
 ): Promise<McpHttpResult> {
   const legacyRequest = legacyToolRequestSchema.safeParse(body)
 
   if (legacyRequest.success) {
+    if (!context.repository) {
+      return { status: 401, body: { error: 'unauthenticated' } }
+    }
+
     return toHttpResult(
-      callMcpTool(legacyRequest.data.tool, legacyRequest.data.input, context),
+      callMcpTool(
+        legacyRequest.data.tool,
+        legacyRequest.data.input,
+        context.repository,
+      ),
     )
   }
 
@@ -137,61 +194,81 @@ export async function resolveMcpHttpRequest(
   if (!rpcRequest.success) {
     return {
       status: 400,
-      body: {
-        error: 'invalid_mcp_request',
-        issues: rpcRequest.error.issues,
-      },
+      body: { error: 'invalid_mcp_request', issues: rpcRequest.error.issues },
     }
   }
 
+  const { method, params } = rpcRequest.data
   const id = rpcRequest.data.id ?? null
 
-  if (rpcRequest.data.method === 'tools/list') {
+  // Notifications (no id) never expect a response body.
+  if (method.startsWith('notifications/')) {
+    return { status: 202, body: null }
+  }
+
+  if (method === 'initialize') {
     return {
       status: 200,
       body: {
         jsonrpc: '2.0',
         id,
         result: {
-          tools: mcpToolDefinitions,
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: { listChanged: false } },
+          serverInfo,
         },
       },
     }
   }
 
-  if (rpcRequest.data.method !== 'tools/call') {
+  if (method === 'ping') {
+    return { status: 200, body: { jsonrpc: '2.0', id, result: {} } }
+  }
+
+  if (method === 'tools/list') {
+    return {
+      status: 200,
+      body: {
+        jsonrpc: '2.0',
+        id,
+        result: { tools: mcpToolDefinitions },
+      },
+    }
+  }
+
+  if (method !== 'tools/call') {
     return {
       status: 404,
       body: jsonRpcError(id, -32601, 'Unsupported MCP method.'),
     }
   }
 
-  const params = toolCallParamsSchema.safeParse(rpcRequest.data.params ?? {})
+  if (!context.repository) {
+    return {
+      status: 401,
+      body: jsonRpcError(id, -32001, 'Authentication required.'),
+    }
+  }
 
-  if (!params.success) {
+  const parsedParams = toolCallParamsSchema.safeParse(params ?? {})
+
+  if (!parsedParams.success) {
     return {
       status: 400,
       body: jsonRpcError(id, -32602, 'Invalid MCP tool call.', {
-        issues: params.error.issues,
+        issues: parsedParams.error.issues,
       }),
     }
   }
 
   try {
     const result = await callMcpTool(
-      params.data.name,
-      params.data.arguments,
-      context,
+      parsedParams.data.name,
+      parsedParams.data.arguments,
+      context.repository,
     )
 
-    return {
-      status: 200,
-      body: {
-        jsonrpc: '2.0',
-        id,
-        result,
-      },
-    }
+    return { status: 200, body: { jsonrpc: '2.0', id, result } }
   } catch (error) {
     const mapped = mapToolError(error)
 
@@ -205,10 +282,8 @@ export async function resolveMcpHttpRequest(
 export async function callMcpTool(
   tool: McpToolName,
   input: unknown,
-  { access, repository = workspaceRepository }: McpToolContext,
+  repository: McpRepository,
 ): Promise<McpToolResult> {
-  requireWorkspaceAccess(access)
-
   if (tool === 'search_pages') {
     const data = searchPagesInputSchema.parse(input ?? {})
     const query = data.query?.trim().toLowerCase()
@@ -237,6 +312,20 @@ export async function callMcpTool(
     return toolResult({ page })
   }
 
+  if (tool === 'create_page') {
+    const data = createPageSchema.parse(input ?? {})
+    const page = await repository.createPage(data)
+
+    return toolResult({ page })
+  }
+
+  if (tool === 'append_block') {
+    const data = createBlockSchema.parse(input ?? {})
+    const block = await repository.createBlock(data)
+
+    return toolResult({ block })
+  }
+
   if (tool === 'update_block') {
     const data = updateBlockSchema.parse(input ?? {})
     const update = await repository.updateBlock(data)
@@ -244,8 +333,8 @@ export async function callMcpTool(
     return toolResult({ update })
   }
 
-  const data = importPrivateChatSchema.parse(input ?? {})
-  const page = await repository.importPrivateChat(data)
+  const data = importTextSchema.parse(input ?? {})
+  const page = await repository.importText(data)
 
   return toolResult({ page })
 }
@@ -254,32 +343,20 @@ async function toHttpResult(
   result: Promise<McpToolResult>,
 ): Promise<McpHttpResult> {
   try {
-    return {
-      status: 200,
-      body: await result,
-    }
+    return { status: 200, body: await result }
   } catch (error) {
     const mapped = mapToolError(error)
 
     return {
       status: mapped.status,
-      body: {
-        error: mapped.code,
-        message: mapped.message,
-        data: mapped.data,
-      },
+      body: { error: mapped.code, message: mapped.message, data: mapped.data },
     }
   }
 }
 
 function toolResult(structuredContent: unknown): McpToolResult {
   return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(structuredContent),
-      },
-    ],
+    content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
     structuredContent,
   }
 }
@@ -290,33 +367,20 @@ function jsonRpcError(
   message: string,
   data?: unknown,
 ) {
-  return {
-    jsonrpc: '2.0',
-    id,
-    error: {
-      code,
-      message,
-      data,
-    },
-  }
+  return { jsonrpc: '2.0', id, error: { code, message, data } }
 }
 
 function mapToolError(error: unknown) {
-  if (error instanceof WorkspaceAccessError) {
-    return {
-      status: error.code === 'unauthenticated' ? 401 : 403,
-      rpcCode: -32001,
-      code: error.code,
-      message: error.message,
-      data: null,
-    }
-  }
-
   if (error instanceof WorkspaceRepositoryError) {
     const status =
       error.code === 'version_conflict'
         ? 409
-        : error.code === 'page_not_found' || error.code === 'block_not_found'
+        : error.code === 'page_not_found' ||
+            error.code === 'block_not_found' ||
+            error.code === 'database_not_found' ||
+            error.code === 'view_not_found' ||
+            error.code === 'property_not_found' ||
+            error.code === 'row_not_found'
           ? 404
           : 400
 
@@ -335,9 +399,7 @@ function mapToolError(error: unknown) {
       rpcCode: -32602,
       code: 'invalid_input',
       message: 'Invalid MCP tool input.',
-      data: {
-        issues: error.issues,
-      },
+      data: { issues: error.issues },
     }
   }
 

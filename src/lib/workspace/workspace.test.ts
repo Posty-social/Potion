@@ -6,145 +6,44 @@ import {
   missingR2SigningVariables,
   sanitizeAssetFileName,
 } from '../assets/intents'
-import { isWorkspaceAuthRequired } from './access'
-import { createImportSlug, sanitizeImportedText } from './import'
-import { getPage, listPages } from './mock-data'
+import { createUniqueSlug, sanitizeImportedText } from './import'
+import { generateKeyBetween, keyAtEnd } from './ordering'
 import {
-  WorkspaceRepositoryError,
-  createSeedWorkspaceRepository,
-} from './repository'
-import {
+  cellValuesSchema,
+  createPageSchema,
   getPageSchema,
-  importPrivateChatSchema,
-  pageSearchSchema,
+  importTextSchema,
   updateBlockSchema,
 } from './schemas'
 import { createPublicLinkToken, isPublicLinkToken } from './share'
+import { initialsFor } from './types'
 
-describe('workspace data safety', () => {
-  it('lists summaries without block content', () => {
-    const summaries = listPages()
+describe('workspace ordering', () => {
+  it('generates keys that sort in insertion order', () => {
+    const first = generateKeyBetween(null, null)
+    const second = generateKeyBetween(first, null)
+    const between = generateKeyBetween(first, second)
 
-    expect(summaries.length).toBeGreaterThan(0)
-    expect(summaries[0]).not.toHaveProperty('blocks')
-    expect(summaries.some((page) => page.slug === 'private-workspace')).toBe(
-      true,
-    )
+    expect(first < second).toBe(true)
+    expect(first < between).toBe(true)
+    expect(between < second).toBe(true)
   })
 
-  it('does not fall back to the private workspace for unknown slugs', () => {
-    expect(getPage('private-workspace')?.title).toBe('Private workspace')
-    expect(getPage('missing-page')).toBeUndefined()
+  it('appends after the largest existing key', () => {
+    const a = generateKeyBetween(null, null)
+    const b = generateKeyBetween(a, null)
+    const end = keyAtEnd([b, a])
+
+    expect(end > a).toBe(true)
+    expect(end > b).toBe(true)
   })
 
-  it('returns cloned pages from the repository', async () => {
-    const repository = createSeedWorkspaceRepository()
-    const page = await repository.getPage('private-workspace')
-
-    expect(page?.blocks[0]?.content).toBe('Private workspace')
-
-    if (page) {
-      page.blocks[0].content = 'Mutated outside repository'
-    }
-
-    const freshPage = await repository.getPage('private-workspace')
-
-    expect(freshPage?.blocks[0]?.content).toBe('Private workspace')
-  })
-
-  it('updates blocks through a version-checked repository method', async () => {
-    const repository = createSeedWorkspaceRepository()
-    const update = await repository.updateBlock({
-      pageId: 'page_private_workspace',
-      blockId: 'block_summary',
-      content: 'Updated summary',
-      version: 1,
-    })
-
-    expect(update).toMatchObject({
-      ok: true,
-      pageId: 'page_private_workspace',
-      blockId: 'block_summary',
-      content: 'Updated summary',
-      version: 2,
-    })
-    await expect(
-      repository.getPage('private-workspace'),
-    ).resolves.toMatchObject({
-      blocks: expect.arrayContaining([
-        expect.objectContaining({
-          id: 'block_summary',
-          content: 'Updated summary',
-        }),
-      ]),
-    })
-  })
-
-  it('fails closed for stale block versions', async () => {
-    const repository = createSeedWorkspaceRepository()
-
-    await expect(
-      repository.updateBlock({
-        pageId: 'page_private_workspace',
-        blockId: 'block_summary',
-        content: 'Stale update',
-        version: 2,
-      }),
-    ).rejects.toMatchObject(
-      new WorkspaceRepositoryError(
-        'version_conflict',
-        'Workspace block has changed since it was loaded.',
-      ),
-    )
-  })
-
-  it('imports sanitized private chats with public links disabled', async () => {
-    const repository = createSeedWorkspaceRepository()
-    const imported = await repository.importPrivateChat({
-      title: 'Housing Notes',
-      transcript: 'Deb\r\n\x00Aimee',
-      source: 'Notion reference',
-    })
-
-    expect(imported).toMatchObject({
-      slug: 'housing-notes',
-      title: 'Housing Notes',
-    })
-
-    const page = await repository.getPage('housing-notes')
-
-    expect(page?.share).toMatchObject({
-      publicEnabled: false,
-      includeChildren: false,
-      tokenPreview: 'pub_disabled',
-    })
-    expect(page?.blocks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'quote',
-          content: 'Deb\nAimee',
-          properties: { source: 'Notion reference' },
-        }),
-      ]),
-    )
+  it('starts a fresh sequence when there are no keys', () => {
+    expect(keyAtEnd([])).toBe(generateKeyBetween(null, null))
   })
 })
 
 describe('workspace input validation', () => {
-  it('parses the auth gate flag explicitly', () => {
-    expect(isWorkspaceAuthRequired()).toBe(false)
-    expect(isWorkspaceAuthRequired('false')).toBe(false)
-    expect(isWorkspaceAuthRequired('0')).toBe(false)
-    expect(isWorkspaceAuthRequired('true')).toBe(true)
-    expect(isWorkspaceAuthRequired('yes')).toBe(true)
-    expect(isWorkspaceAuthRequired('ON')).toBe(true)
-  })
-
-  it('defaults invalid collection views to table', () => {
-    expect(pageSearchSchema.parse({ view: 'board' }).view).toBe('table')
-    expect(pageSearchSchema.parse({}).view).toBe('table')
-  })
-
   it('accepts only simple page slugs', () => {
     expect(
       getPageSchema.safeParse({ slug: 'deployment-handoff' }).success,
@@ -157,11 +56,20 @@ describe('workspace input validation', () => {
     )
   })
 
+  it('requires a title when creating a page', () => {
+    expect(createPageSchema.safeParse({ title: 'Notes' }).success).toBe(true)
+    expect(createPageSchema.safeParse({ title: '' }).success).toBe(false)
+    expect(
+      createPageSchema.safeParse({ title: 'Child', parentPageId: 'page_1' })
+        .success,
+    ).toBe(true)
+  })
+
   it('caps edited block content length', () => {
     expect(
       updateBlockSchema.safeParse({
-        pageId: 'page_private_workspace',
-        blockId: 'block_summary',
+        pageId: 'page_1',
+        blockId: 'block_1',
         content: 'Safe update',
         version: 1,
       }).success,
@@ -169,32 +77,43 @@ describe('workspace input validation', () => {
 
     expect(
       updateBlockSchema.safeParse({
-        pageId: 'page_private_workspace',
-        blockId: 'block_summary',
+        pageId: 'page_1',
+        blockId: 'block_1',
         content: 'x'.repeat(20_001),
         version: 1,
       }).success,
     ).toBe(false)
   })
 
-  it('sanitizes private import input before repository use', () => {
+  it('validates collection cell values', () => {
+    expect(
+      cellValuesSchema.safeParse({ f1: 'text', f2: 3, f3: true, f4: null })
+        .success,
+    ).toBe(true)
+    expect(cellValuesSchema.safeParse({ f1: ['a', 'b'] }).success).toBe(true)
+    expect(cellValuesSchema.safeParse({ f1: { nested: true } }).success).toBe(
+      false,
+    )
+  })
+
+  it('sanitizes imported text before use', () => {
     expect(sanitizeImportedText('  one\r\ntwo\x00  ')).toBe('one\ntwo')
     expect(
-      importPrivateChatSchema.parse({
+      importTextSchema.parse({
         title: '  Exported chat  ',
-        transcript: '  Line one\r\nLine two  ',
+        body: '  Line one\r\nLine two  ',
       }),
     ).toEqual({
       title: 'Exported chat',
-      transcript: 'Line one\nLine two',
+      body: 'Line one\nLine two',
     })
   })
 
-  it('deduplicates private import slugs', () => {
-    expect(createImportSlug('Housing Notes', new Set(['housing-notes']))).toBe(
+  it('deduplicates page slugs', () => {
+    expect(createUniqueSlug('Housing Notes', new Set(['housing-notes']))).toBe(
       'housing-notes-2',
     )
-    expect(createImportSlug('!@#', new Set())).toBe('private-import')
+    expect(createUniqueSlug('!@#', new Set())).toBe('untitled')
   })
 
   it('validates token-shaped public links', () => {
@@ -203,6 +122,12 @@ describe('workspace input validation', () => {
     expect(token).toBe('pub_1234567890abcdef1234567890abcdef')
     expect(isPublicLinkToken(token)).toBe(true)
     expect(isPublicLinkToken('pub_disabled')).toBe(false)
+  })
+
+  it('derives user initials', () => {
+    expect(initialsFor('Ada Lovelace', 'ada@example.com')).toBe('AL')
+    expect(initialsFor('', 'grace@example.com')).toBe('GR')
+    expect(initialsFor('Mononym', 'm@example.com')).toBe('MO')
   })
 
   it('validates R2 asset upload intents and sanitized keys', () => {

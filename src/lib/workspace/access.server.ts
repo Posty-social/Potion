@@ -1,32 +1,89 @@
-import { getRuntimeEnv } from '#/lib/db/connection'
+import { eq } from 'drizzle-orm'
 
-import { isWorkspaceAuthRequired, type WorkspaceAccess } from './access'
+import { auth } from '#/lib/auth'
+import { db } from '#/lib/db/connection'
+import { member } from '#/lib/db/schema'
 
+import type { WorkspaceAccess } from './access'
+import type { WorkspaceContext } from './repository'
+
+/**
+ * Resolve the acting user and their active workspace organization from the
+ * request. Auth is always required; an unauthenticated request resolves to a
+ * null user so callers can redirect to the login page.
+ */
 export async function resolveWorkspaceAccess(
   headers: Headers,
 ): Promise<WorkspaceAccess> {
-  const authRequired = isWorkspaceAuthRequired(
-    getRuntimeEnv().WORKSPACE_AUTH_REQUIRED,
-  )
-
-  if (!authRequired) {
-    return {
-      authRequired: false,
-      user: null,
-    }
-  }
-
-  const { auth } = await import('#/lib/auth')
   const session = await auth.api.getSession({ headers })
 
-  return {
-    authRequired: true,
-    user: session?.user
-      ? {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.name,
-        }
-      : null,
+  if (!session?.user) {
+    return { user: null, organizationId: null }
   }
+
+  let organizationId = session.session.activeOrganizationId ?? null
+
+  if (!organizationId) {
+    const [membership] = await db
+      .select({ organizationId: member.organizationId })
+      .from(member)
+      .where(eq(member.userId, session.user.id))
+      .limit(1)
+
+    organizationId = membership?.organizationId ?? null
+  }
+
+  return {
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    },
+    organizationId,
+  }
+}
+
+async function organizationForUser(userId: string): Promise<string | null> {
+  const [membership] = await db
+    .select({ organizationId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, userId))
+    .limit(1)
+
+  return membership?.organizationId ?? null
+}
+
+/**
+ * Resolve the acting user + organization for an MCP request. Accepts either an
+ * OAuth access token (issued to MCP clients) or a normal Better Auth session
+ * cookie. Returns null when the request is not authenticated.
+ */
+export async function resolveMcpContext(
+  headers: Headers,
+): Promise<WorkspaceContext | null> {
+  let userId: string | null = null
+
+  try {
+    const token = await auth.api.getMcpSession({ headers })
+    userId = token?.userId ?? null
+  } catch {
+    userId = null
+  }
+
+  if (!userId) {
+    const session = await auth.api.getSession({ headers }).catch(() => null)
+    userId = session?.user?.id ?? null
+  }
+
+  if (!userId) {
+    return null
+  }
+
+  const organizationId = await organizationForUser(userId)
+
+  if (!organizationId) {
+    return null
+  }
+
+  return { organizationId, userId }
 }

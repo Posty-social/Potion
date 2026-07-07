@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const port = Number(process.env.E2E_PORT ?? 4300)
-const baseURL = `http://127.0.0.1:${port}`
+// Match the app's pinned dev port (see the `dev` script: 3001 + strictPort;
+// 3000 is often taken by OrbStack). Reuses a running `bun run dev` if present.
+const port = Number(process.env.E2E_PORT ?? 3001)
+const baseURL = `http://localhost:${port}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -17,7 +19,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: `bun x vite dev --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `bun x vite dev --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

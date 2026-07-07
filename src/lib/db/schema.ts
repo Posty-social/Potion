@@ -33,10 +33,12 @@ export type BlockType =
   | 'database'
 
 export type CollectionFieldType =
+  | 'title'
   | 'text'
   | 'number'
   | 'select'
   | 'multi_select'
+  | 'status'
   | 'date'
   | 'checkbox'
   | 'person'
@@ -48,10 +50,10 @@ export type CollectionFieldType =
 
 export type CollectionViewType =
   | 'table'
-  | 'kanban'
-  | 'calendar'
-  | 'gallery'
+  | 'board'
   | 'list'
+  | 'gallery'
+  | 'calendar'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -64,6 +66,7 @@ export type CollectionField = {
 
 export type CollectionViewConfig = {
   groupByFieldId?: string
+  datePropertyId?: string
   groupOrder?: string[]
   visibleFieldIds?: string[]
   filters?: JsonRecord[]

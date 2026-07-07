@@ -1,5 +1,4 @@
 BETTER_AUTH_SECRET=replace-with-output-from-better-auth-cli-secret
-WORKSPACE_AUTH_REQUIRED=false
 
 # Optional local OAuth provider values.
 GOOGLE_CLIENT_ID=

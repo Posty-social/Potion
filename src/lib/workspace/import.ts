@@ -13,13 +13,17 @@ export function sanitizeImportedText(value: string) {
   return sanitized.trim()
 }
 
-export function createImportSlug(title: string, existingSlugs: Set<string>) {
+export function createUniqueSlug(
+  title: string,
+  existingSlugs: Set<string>,
+  fallback = 'untitled',
+) {
   const base =
     sanitizeImportedText(title)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'private-import'
+      .slice(0, 64) || fallback
 
   let slug = base
   let index = 2
@@ -30,4 +34,9 @@ export function createImportSlug(title: string, existingSlugs: Set<string>) {
   }
 
   return slug
+}
+
+/** @deprecated use {@link createUniqueSlug}. Retained for import flows. */
+export function createImportSlug(title: string, existingSlugs: Set<string>) {
+  return createUniqueSlug(title, existingSlugs, 'private-import')
 }

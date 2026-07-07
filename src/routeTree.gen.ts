@@ -13,6 +13,8 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PagesPageSlugRouteImport } from './routes/pages/$pageSlug'
+import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known.oauth-protected-resource'
+import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiRealtimePagesPageIdRouteImport } from './routes/api/realtime/pages/$pageId'
 
@@ -36,6 +38,18 @@ const PagesPageSlugRoute = PagesPageSlugRouteImport.update({
   path: '/pages/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownOauthProtectedResourceRoute =
+  DotwellKnownOauthProtectedResourceRouteImport.update({
+    id: '/.well-known/oauth-protected-resource',
+    path: '/.well-known/oauth-protected-resource',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownOauthAuthorizationServerRoute =
+  DotwellKnownOauthAuthorizationServerRouteImport.update({
+    id: '/.well-known/oauth-authorization-server',
+    path: '/.well-known/oauth-authorization-server',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -51,6 +65,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
@@ -59,6 +75,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
@@ -68,6 +86,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/pages/$pageSlug': typeof PagesPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
@@ -78,6 +98,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/mcp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/pages/$pageSlug'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
@@ -86,6 +108,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/mcp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/pages/$pageSlug'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
@@ -94,6 +118,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/mcp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/pages/$pageSlug'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
@@ -103,6 +129,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRoute
+  DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
+  DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRoute
   PagesPageSlugRoute: typeof PagesPageSlugRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiRealtimePagesPageIdRoute: typeof ApiRealtimePagesPageIdRoute
@@ -138,6 +166,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PagesPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/.well-known/oauth-protected-resource': {
+      id: '/.well-known/oauth-protected-resource'
+      path: '/.well-known/oauth-protected-resource'
+      fullPath: '/.well-known/oauth-protected-resource'
+      preLoaderRoute: typeof DotwellKnownOauthProtectedResourceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/oauth-authorization-server': {
+      id: '/.well-known/oauth-authorization-server'
+      path: '/.well-known/oauth-authorization-server'
+      fullPath: '/.well-known/oauth-authorization-server'
+      preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -159,6 +201,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   McpRoute: McpRoute,
+  DotwellKnownOauthAuthorizationServerRoute:
+    DotwellKnownOauthAuthorizationServerRoute,
+  DotwellKnownOauthProtectedResourceRoute:
+    DotwellKnownOauthProtectedResourceRoute,
   PagesPageSlugRoute: PagesPageSlugRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiRealtimePagesPageIdRoute: ApiRealtimePagesPageIdRoute,

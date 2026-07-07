@@ -7,6 +7,11 @@ import { defineConfig } from 'vite'
 
 const config = defineConfig({
   resolve: { tsconfigPaths: true },
+  // Pre-bundle heavier client deps at startup so Vite doesn't discover them
+  // mid-session and trigger a full-page reload to re-optimize.
+  optimizeDeps: {
+    include: ['@tanstack/react-table', '@tanstack/react-form'],
+  },
   plugins: [
     devtools(),
     cloudflare({ viteEnvironment: { name: 'ssr' } }),

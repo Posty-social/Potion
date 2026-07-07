@@ -18,7 +18,7 @@ jobs:
       D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'potion-db' }}
       R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME || 'potion-assets' }}
       PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET || 'potion-pulumi-state' }}
-      WORKSPACE_AUTH_REQUIRED: ${{ vars.WORKSPACE_AUTH_REQUIRED || 'true' }}
+      ZERO_TRUST_EMAILS: ${{ vars.ZERO_TRUST_EMAILS }}
       GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ vars.GITHUB_CLIENT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -61,13 +61,17 @@ jobs:
       - name: Apply D1 Migrations
         run: bun run db:migrate:remote
 
+      # Rewrites wrangler.jsonc for production (custom domain on APP_DOMAIN,
+      # workers.dev disabled so Cloudflare Access cannot be bypassed, prod
+      # vars) and rebuilds so the vite plugin bakes it into the deploy output.
+      - name: Prepare Production Config
+        run: |
+          bun scripts/prepare-wrangler-deploy.mjs --write
+          bun run build
+
       - name: Sync Worker Runtime Values
         run: |
-          printf "%s" "https://${APP_DOMAIN}" | bun x wrangler secret put BETTER_AUTH_URL
-          printf "%s" "${APP_DOMAIN}" | bun x wrangler secret put APP_DOMAIN
           printf "%s" "${BETTER_AUTH_SECRET}" | bun x wrangler secret put BETTER_AUTH_SECRET
-          printf "%s" "${WORKSPACE_AUTH_REQUIRED}" | bun x wrangler secret put WORKSPACE_AUTH_REQUIRED
-          printf "%s" "${R2_BUCKET_NAME}" | bun x wrangler secret put R2_BUCKET_NAME
           printf "%s" "${R2_ACCESS_KEY_ID}" | bun x wrangler secret put R2_ACCESS_KEY_ID
           printf "%s" "${R2_SECRET_ACCESS_KEY}" | bun x wrangler secret put R2_SECRET_ACCESS_KEY
           if [ -n "${GOOGLE_CLIENT_ID}" ]; then printf "%s" "${GOOGLE_CLIENT_ID}" | bun x wrangler secret put GOOGLE_CLIENT_ID; fi

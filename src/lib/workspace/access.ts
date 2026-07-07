@@ -1,10 +1,12 @@
+export type WorkspaceUserContext = {
+  id: string
+  email: string
+  name?: string | null
+}
+
 export type WorkspaceAccess = {
-  authRequired: boolean
-  user: {
-    id: string
-    email: string
-    name?: string | null
-  } | null
+  user: WorkspaceUserContext | null
+  organizationId: string | null
 }
 
 export class WorkspaceAccessError extends Error {
@@ -17,19 +19,25 @@ export class WorkspaceAccessError extends Error {
   }
 }
 
-export function isWorkspaceAuthRequired(value?: string) {
-  return ['1', 'true', 'yes', 'on'].includes(value?.trim().toLowerCase() ?? '')
+export function hasWorkspaceAccess(
+  access: WorkspaceAccess,
+): access is WorkspaceAccess & {
+  user: WorkspaceUserContext
+  organizationId: string
+} {
+  return access.user !== null && access.organizationId !== null
 }
 
-export function hasWorkspaceAccess(access: WorkspaceAccess) {
-  return !access.authRequired || access.user !== null
-}
-
-export function requireWorkspaceAccess(access: WorkspaceAccess) {
+export function requireWorkspaceAccess(access: WorkspaceAccess): {
+  user: WorkspaceUserContext
+  organizationId: string
+} {
   if (!hasWorkspaceAccess(access)) {
     throw new WorkspaceAccessError(
       'unauthenticated',
       'Sign in to access this workspace.',
     )
   }
+
+  return { user: access.user, organizationId: access.organizationId }
 }

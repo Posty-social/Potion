@@ -13,23 +13,14 @@ import {
   workspacePageQuery,
   workspacePagesQuery,
 } from '#/lib/workspace/functions'
-import { pageSearchSchema } from '#/lib/workspace/schemas'
 
 export const Route = createFileRoute('/pages/$pageSlug')({
-  validateSearch: pageSearchSchema,
   beforeLoad: async ({ location }) => {
     const access = await getWorkspaceAccess()
 
-    if (access.authRequired && !access.user) {
-      throw redirect({
-        to: '/login',
-        search: {
-          redirect: location.href,
-        },
-      })
+    if (!access.user) {
+      throw redirect({ to: '/login', search: { redirect: location.href } })
     }
-
-    return { access }
   },
   loader: async ({ context, params }) => {
     const pages = await context.queryClient.ensureQueryData(
@@ -50,33 +41,23 @@ export const Route = createFileRoute('/pages/$pageSlug')({
 
 function PageRoute() {
   const { pageSlug } = Route.useParams()
-  const search = Route.useSearch()
   const { data: page } = useSuspenseQuery(workspacePageQuery(pageSlug))
   const { data: pages } = useSuspenseQuery(workspacePagesQuery())
 
-  return <WorkspaceShell page={page} pages={pages} search={search} />
+  return <WorkspaceShell page={page} pages={pages} />
 }
 
 function PageNotFound() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--workspace-bg)] px-4 text-[var(--workspace-ink)]">
-      <section className="flex max-w-md flex-col items-start gap-4 rounded-lg border border-[var(--workspace-line)] bg-white p-6 shadow-sm">
-        <p className="text-muted-foreground text-sm font-semibold">
-          Page unavailable
-        </p>
-        <h1 className="display-title text-3xl font-bold">Nothing to show</h1>
+    <main className="flex min-h-screen items-center justify-center px-4">
+      <section className="flex max-w-md flex-col items-start gap-4 rounded-xl border border-[var(--workspace-line)] bg-[var(--workspace-paper)] p-6 shadow-sm">
+        <h1 className="display-title text-2xl font-bold">Page not found</h1>
         <p className="text-muted-foreground text-sm leading-6">
-          This page does not exist in the workspace or you do not have access to
-          it.
+          This page does not exist in your workspace, or you do not have access
+          to it.
         </p>
         <Button asChild>
-          <Link
-            to="/pages/$pageSlug"
-            params={{ pageSlug: 'private-workspace' }}
-            search={{ view: 'table' }}
-          >
-            Open workspace
-          </Link>
+          <Link to="/">Back to workspace</Link>
         </Button>
       </section>
     </main>
