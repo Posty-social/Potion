@@ -5,34 +5,83 @@ import {
   type WorkspaceRepository,
 } from '#/lib/workspace/repository'
 import {
+  addRowSchema,
   createBlockSchema,
   createPageSchema,
+  deleteBlockSchema,
+  deletePageSchema,
+  deleteRowSchema,
   getPageSchema,
   importTextSchema,
+  renamePageSchema,
+  setBlockCheckedSchema,
+  setPageIconSchema,
   updateBlockSchema,
+  updateRowSchema,
 } from '#/lib/workspace/schemas'
 
 /** The subset of the repository the MCP tools depend on. */
 export type McpRepository = Pick<
   WorkspaceRepository,
   | 'listPages'
+  | 'searchPages'
   | 'getPage'
+  | 'getDatabaseById'
   | 'createPage'
+  | 'renamePage'
+  | 'setPageIcon'
+  | 'deletePage'
   | 'createBlock'
   | 'updateBlock'
+  | 'setBlockChecked'
+  | 'deleteBlock'
+  | 'addRow'
+  | 'updateRow'
+  | 'deleteRow'
   | 'importText'
 >
 
 const mcpToolNames = [
+  'list_workspaces',
   'search_pages',
   'read_page',
+  'read_database',
   'create_page',
+  'rename_page',
+  'set_page_icon',
+  'delete_page',
   'append_block',
   'update_block',
+  'toggle_todo',
+  'delete_block',
+  'add_row',
+  'update_row',
+  'delete_row',
   'import_text',
 ] as const
 
 export type McpToolName = (typeof mcpToolNames)[number]
+
+/** A workspace the authenticated user can act in, as reported to MCP clients. */
+export type McpWorkspaceInfo = {
+  id: string
+  name: string
+  slug: string
+  role: string
+  isDefault: boolean
+}
+
+/**
+ * Multi-workspace support for MCP. When present on the request context it
+ * enables `list_workspaces` and lets any tool target a specific workspace via a
+ * `workspaceId` argument; when absent, tools act on the single default
+ * repository (used by unit tests and legacy single-workspace callers).
+ */
+export type McpWorkspaceGateway = {
+  list: () => Promise<McpWorkspaceInfo[]>
+  // Build a repository for workspaceId, validating the user's membership.
+  repositoryFor: (workspaceId: string) => Promise<McpRepository>
+}
 
 type McpToolResult = {
   content: Array<{ type: 'text'; text: string }>
@@ -46,9 +95,13 @@ type McpHttpResult = {
 
 const mcpToolNameSchema = z.enum(mcpToolNames)
 const unknownRecordSchema = z.record(z.string(), z.unknown())
+const DEFAULT_SEARCH_LIMIT = 25
+const MAX_SEARCH_LIMIT = 100
 const searchPagesInputSchema = z.object({
   query: z.string().max(120).optional(),
+  limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
 })
+const readDatabaseInputSchema = z.object({ databaseId: z.string().min(1) })
 const legacyToolRequestSchema = z.object({
   tool: mcpToolNameSchema,
   input: z.unknown().optional(),
@@ -65,42 +118,146 @@ const toolCallParamsSchema = z.object({
   arguments: z.unknown().optional(),
 })
 
+// Every page tool accepts an optional `workspaceId` to target a specific
+// workspace (obtained from `list_workspaces`). Omit it to use your default
+// (primary) workspace.
+const workspaceIdProperty = {
+  workspaceId: {
+    type: 'string',
+    description:
+      'Optional workspace id to act in (from list_workspaces). Defaults to your primary workspace.',
+  },
+} as const
+
+// MCP tool annotations are hints clients use to decide auto-approval and
+// destructive-action warnings. readOnly = no writes; destructive = removes
+// data; idempotent = repeating the same call has no additional effect.
+type ToolAnnotations = {
+  title: string
+  readOnlyHint?: boolean
+  destructiveHint?: boolean
+  idempotentHint?: boolean
+}
+
 export const mcpToolDefinitions = [
   {
-    name: 'search_pages',
-    description: 'Search the workspace pages you have access to.',
+    name: 'list_workspaces',
+    description:
+      'List the workspaces you can access, with their ids and roles. Pass a returned id as `workspaceId` to other tools to act in that workspace.',
+    annotations: { title: 'List workspaces', readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { query: { type: 'string', maxLength: 120 } },
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_pages',
+    description:
+      'Search pages by title, slug, or body text. Returns page summaries.',
+    annotations: { title: 'Search pages', readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', maxLength: 120 },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_SEARCH_LIMIT,
+          description: `Max results (default ${DEFAULT_SEARCH_LIMIT}).`,
+        },
+        ...workspaceIdProperty,
+      },
       additionalProperties: false,
     },
   },
   {
     name: 'read_page',
-    description: 'Read a workspace page (blocks and collections) by slug.',
+    description: 'Read a workspace page (blocks and databases) by slug.',
+    annotations: { title: 'Read page', readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { slug: { type: 'string' } },
+      properties: { slug: { type: 'string' }, ...workspaceIdProperty },
       required: ['slug'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_database',
+    description:
+      'Read a database (its properties, views, and all rows) by id. Get the id from a database block in read_page.',
+    annotations: { title: 'Read database', readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: { databaseId: { type: 'string' }, ...workspaceIdProperty },
+      required: ['databaseId'],
       additionalProperties: false,
     },
   },
   {
     name: 'create_page',
     description: 'Create a new page, optionally nested under a parent page.',
+    annotations: { title: 'Create page' },
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', maxLength: 120 },
         parentPageId: { type: 'string' },
+        ...workspaceIdProperty,
       },
       required: ['title'],
       additionalProperties: false,
     },
   },
   {
+    name: 'rename_page',
+    description: 'Rename a page.',
+    annotations: { title: 'Rename page', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        title: { type: 'string', maxLength: 120 },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_page_icon',
+    description: 'Set a page icon (a single emoji or short string).',
+    annotations: { title: 'Set page icon', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        icon: { type: 'string', maxLength: 16 },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'icon'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_page',
+    description: 'Delete a page and its sub-pages. This cannot be undone.',
+    annotations: {
+      title: 'Delete page',
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: { pageId: { type: 'string' }, ...workspaceIdProperty },
+      required: ['pageId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'append_block',
     description: 'Append a block to the end of a page.',
+    annotations: { title: 'Append block' },
     inputSchema: {
       type: 'object',
       properties: {
@@ -120,6 +277,7 @@ export const mcpToolDefinitions = [
           ],
         },
         content: { type: 'string', maxLength: 20_000 },
+        ...workspaceIdProperty,
       },
       required: ['pageId', 'type'],
       additionalProperties: false,
@@ -128,6 +286,7 @@ export const mcpToolDefinitions = [
   {
     name: 'update_block',
     description: 'Update a block using page, block, and version checks.',
+    annotations: { title: 'Update block' },
     inputSchema: {
       type: 'object',
       properties: {
@@ -135,20 +294,101 @@ export const mcpToolDefinitions = [
         blockId: { type: 'string' },
         content: { type: 'string', maxLength: 20_000 },
         version: { type: 'integer', minimum: 1 },
+        ...workspaceIdProperty,
       },
       required: ['pageId', 'blockId', 'content', 'version'],
       additionalProperties: false,
     },
   },
   {
+    name: 'toggle_todo',
+    description: 'Check or uncheck a to-do block.',
+    annotations: { title: 'Toggle to-do', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        blockId: { type: 'string' },
+        checked: { type: 'boolean' },
+        ...workspaceIdProperty,
+      },
+      required: ['blockId', 'checked'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_block',
+    description:
+      'Delete a block. Deleting a database block removes the database and its rows. This cannot be undone.',
+    annotations: {
+      title: 'Delete block',
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: { blockId: { type: 'string' }, ...workspaceIdProperty },
+      required: ['blockId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_row',
+    description:
+      'Add a row to a database. `values` maps property ids to cell values (see the database schema from read_page/read_database).',
+    annotations: { title: 'Add database row' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        databaseId: { type: 'string' },
+        values: { type: 'object', additionalProperties: true },
+        ...workspaceIdProperty,
+      },
+      required: ['databaseId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_row',
+    description:
+      'Update cell values on a database row. Provided values are merged into the existing row.',
+    annotations: { title: 'Update database row', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rowId: { type: 'string' },
+        values: { type: 'object', additionalProperties: true },
+        ...workspaceIdProperty,
+      },
+      required: ['rowId', 'values'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_row',
+    description: 'Delete a database row. This cannot be undone.',
+    annotations: {
+      title: 'Delete database row',
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: { rowId: { type: 'string' }, ...workspaceIdProperty },
+      required: ['rowId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'import_text',
     description: 'Import sanitized text as a new page.',
+    annotations: { title: 'Import text' },
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', maxLength: 120 },
         body: { type: 'string', maxLength: 100_000 },
         source: { type: 'string', maxLength: 120 },
+        ...workspaceIdProperty,
       },
       required: ['title', 'body'],
       additionalProperties: false,
@@ -157,6 +397,7 @@ export const mcpToolDefinitions = [
 ] satisfies Array<{
   name: McpToolName
   description: string
+  annotations: ToolAnnotations
   inputSchema: Record<string, unknown>
 }>
 
@@ -165,18 +406,72 @@ const serverInfo = {
   version: '1.0.0',
 }
 
+// Guidance surfaced to clients on `initialize` so the model uses the server
+// correctly without trial and error.
+const serverInstructions = [
+  'Potion is a Notion-style workspace of pages, blocks, and databases.',
+  'Call list_workspaces first if the user may have more than one workspace;',
+  'pass a workspaceId to any tool to act there, or omit it to use the primary',
+  'workspace. Read a page with read_page (by slug) and a database with',
+  'read_database (by id, found on database blocks). Writes are scoped to the',
+  'chosen workspace; delete_* tools are destructive and cannot be undone.',
+].join(' ')
+
+// Pages are also exposed as MCP resources for the primary workspace.
+const PAGE_RESOURCE_PREFIX = 'potion://page/'
+
 export type McpRequestContext = {
+  // The default (primary) workspace repository; null when unauthenticated.
   repository: McpRepository | null
+  // Optional multi-workspace gateway; enables list_workspaces + workspaceId.
+  workspaces?: McpWorkspaceGateway | null
+}
+
+/** Resolved, authenticated context handed to individual tool handlers. */
+type McpToolContext = {
+  defaultRepository: McpRepository
+  workspaces: McpWorkspaceGateway | null
+}
+
+/** Repository for a tool call: the requested workspace, or the default. */
+async function repositoryForCall(
+  context: McpToolContext,
+  workspaceId?: string,
+): Promise<McpRepository> {
+  if (workspaceId && context.workspaces) {
+    return context.workspaces.repositoryFor(workspaceId)
+  }
+
+  return context.defaultRepository
+}
+
+/** Pull an optional `workspaceId` off tool arguments, leaving the rest. */
+function takeWorkspaceId(input: unknown): {
+  workspaceId?: string
+  rest: unknown
+} {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const { workspaceId, ...rest } = input as Record<string, unknown>
+
+    return {
+      workspaceId: typeof workspaceId === 'string' ? workspaceId : undefined,
+      rest,
+    }
+  }
+
+  return { rest: input }
 }
 
 export async function resolveMcpHttpRequest(
   body: unknown,
   context: McpRequestContext,
 ): Promise<McpHttpResult> {
+  const toolContext = buildToolContext(context)
+
   const legacyRequest = legacyToolRequestSchema.safeParse(body)
 
   if (legacyRequest.success) {
-    if (!context.repository) {
+    if (!toolContext) {
       return { status: 401, body: { error: 'unauthenticated' } }
     }
 
@@ -184,7 +479,7 @@ export async function resolveMcpHttpRequest(
       callMcpTool(
         legacyRequest.data.tool,
         legacyRequest.data.input,
-        context.repository,
+        toolContext,
       ),
     )
   }
@@ -214,8 +509,12 @@ export async function resolveMcpHttpRequest(
         id,
         result: {
           protocolVersion: '2024-11-05',
-          capabilities: { tools: { listChanged: false } },
+          capabilities: {
+            tools: { listChanged: false },
+            resources: { listChanged: false },
+          },
           serverInfo,
+          instructions: serverInstructions,
         },
       },
     }
@@ -236,6 +535,39 @@ export async function resolveMcpHttpRequest(
     }
   }
 
+  // --- Resources (pages of the primary workspace) ------------------------
+  if (method === 'resources/templates/list') {
+    return {
+      status: 200,
+      body: { jsonrpc: '2.0', id, result: { resourceTemplates: [] } },
+    }
+  }
+
+  if (method === 'resources/list' || method === 'resources/read') {
+    if (!toolContext) {
+      return {
+        status: 401,
+        body: jsonRpcError(id, -32001, 'Authentication required.'),
+      }
+    }
+
+    try {
+      const result =
+        method === 'resources/list'
+          ? await listPageResources(toolContext.defaultRepository)
+          : await readPageResource(toolContext.defaultRepository, params)
+
+      return { status: 200, body: { jsonrpc: '2.0', id, result } }
+    } catch (error) {
+      const mapped = mapToolError(error)
+
+      return {
+        status: mapped.status,
+        body: jsonRpcError(id, mapped.rpcCode, mapped.message, mapped.data),
+      }
+    }
+  }
+
   if (method !== 'tools/call') {
     return {
       status: 404,
@@ -243,7 +575,7 @@ export async function resolveMcpHttpRequest(
     }
   }
 
-  if (!context.repository) {
+  if (!toolContext) {
     return {
       status: 401,
       body: jsonRpcError(id, -32001, 'Authentication required.'),
@@ -265,7 +597,7 @@ export async function resolveMcpHttpRequest(
     const result = await callMcpTool(
       parsedParams.data.name,
       parsedParams.data.arguments,
-      context.repository,
+      toolContext,
     )
 
     return { status: 200, body: { jsonrpc: '2.0', id, result } }
@@ -279,27 +611,44 @@ export async function resolveMcpHttpRequest(
   }
 }
 
+function buildToolContext(context: McpRequestContext): McpToolContext | null {
+  if (!context.repository) {
+    return null
+  }
+
+  return {
+    defaultRepository: context.repository,
+    workspaces: context.workspaces ?? null,
+  }
+}
+
 export async function callMcpTool(
   tool: McpToolName,
   input: unknown,
-  repository: McpRepository,
+  context: McpToolContext,
 ): Promise<McpToolResult> {
-  if (tool === 'search_pages') {
-    const data = searchPagesInputSchema.parse(input ?? {})
-    const query = data.query?.trim().toLowerCase()
-    const pages = await repository.listPages()
+  if (tool === 'list_workspaces') {
+    const workspaces = context.workspaces ? await context.workspaces.list() : []
 
-    return toolResult({
-      pages: query
-        ? pages.filter((page) =>
-            `${page.title} ${page.slug}`.toLowerCase().includes(query),
-          )
-        : pages,
-    })
+    return toolResult({ workspaces })
+  }
+
+  const { workspaceId, rest } = takeWorkspaceId(input)
+  const repository = await repositoryForCall(context, workspaceId)
+
+  if (tool === 'search_pages') {
+    const data = searchPagesInputSchema.parse(rest ?? {})
+    const limit = data.limit ?? DEFAULT_SEARCH_LIMIT
+    const query = data.query?.trim()
+    const pages = query
+      ? await repository.searchPages(query, limit)
+      : (await repository.listPages()).slice(0, limit)
+
+    return toolResult({ pages })
   }
 
   if (tool === 'read_page') {
-    const data = getPageSchema.parse(input ?? {})
+    const data = getPageSchema.parse(rest ?? {})
     const page = await repository.getPage(data.slug)
 
     if (!page) {
@@ -312,31 +661,149 @@ export async function callMcpTool(
     return toolResult({ page })
   }
 
+  if (tool === 'read_database') {
+    const data = readDatabaseInputSchema.parse(rest ?? {})
+    const database = await repository.getDatabaseById(data.databaseId)
+
+    if (!database) {
+      throw new WorkspaceRepositoryError(
+        'database_not_found',
+        'Database was not found.',
+      )
+    }
+
+    return toolResult({ database })
+  }
+
   if (tool === 'create_page') {
-    const data = createPageSchema.parse(input ?? {})
+    const data = createPageSchema.parse(rest ?? {})
     const page = await repository.createPage(data)
 
     return toolResult({ page })
   }
 
+  if (tool === 'rename_page') {
+    const data = renamePageSchema.parse(rest ?? {})
+    const page = await repository.renamePage(data)
+
+    return toolResult({ page })
+  }
+
+  if (tool === 'set_page_icon') {
+    const data = setPageIconSchema.parse(rest ?? {})
+    const result = await repository.setPageIcon(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'delete_page') {
+    const data = deletePageSchema.parse(rest ?? {})
+    const result = await repository.deletePage(data)
+
+    return toolResult(result)
+  }
+
   if (tool === 'append_block') {
-    const data = createBlockSchema.parse(input ?? {})
+    const data = createBlockSchema.parse(rest ?? {})
     const block = await repository.createBlock(data)
 
     return toolResult({ block })
   }
 
   if (tool === 'update_block') {
-    const data = updateBlockSchema.parse(input ?? {})
+    const data = updateBlockSchema.parse(rest ?? {})
     const update = await repository.updateBlock(data)
 
     return toolResult({ update })
   }
 
-  const data = importTextSchema.parse(input ?? {})
+  if (tool === 'toggle_todo') {
+    const data = setBlockCheckedSchema.parse(rest ?? {})
+    const result = await repository.setBlockChecked(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'delete_block') {
+    const data = deleteBlockSchema.parse(rest ?? {})
+    const result = await repository.deleteBlock(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'add_row') {
+    const data = addRowSchema.parse(rest ?? {})
+    const row = await repository.addRow(data)
+
+    return toolResult({ row })
+  }
+
+  if (tool === 'update_row') {
+    const data = updateRowSchema.parse(rest ?? {})
+    const result = await repository.updateRow(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'delete_row') {
+    const data = deleteRowSchema.parse(rest ?? {})
+    const result = await repository.deleteRow(data)
+
+    return toolResult(result)
+  }
+
+  const data = importTextSchema.parse(rest ?? {})
   const page = await repository.importText(data)
 
   return toolResult({ page })
+}
+
+// --- Resources -----------------------------------------------------------
+
+async function listPageResources(repository: McpRepository) {
+  const pages = await repository.listPages()
+
+  return {
+    resources: pages.map((page) => ({
+      uri: `${PAGE_RESOURCE_PREFIX}${page.slug}`,
+      name: page.title || 'Untitled',
+      description: `Workspace page: ${page.title || 'Untitled'}`,
+      mimeType: 'application/json',
+    })),
+  }
+}
+
+const resourceReadParamsSchema = z.object({ uri: z.string() })
+
+async function readPageResource(repository: McpRepository, params: unknown) {
+  const { uri } = resourceReadParamsSchema.parse(params ?? {})
+
+  if (!uri.startsWith(PAGE_RESOURCE_PREFIX)) {
+    throw new WorkspaceRepositoryError(
+      'page_not_found',
+      `Unknown resource uri: ${uri}`,
+    )
+  }
+
+  const slug = uri.slice(PAGE_RESOURCE_PREFIX.length)
+  const page = await repository.getPage(slug)
+
+  if (!page) {
+    throw new WorkspaceRepositoryError(
+      'page_not_found',
+      'Workspace page was not found.',
+    )
+  }
+
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: 'application/json',
+        text: JSON.stringify(page),
+      },
+    ],
+  }
 }
 
 async function toHttpResult(

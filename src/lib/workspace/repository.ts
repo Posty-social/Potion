@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, like, or } from 'drizzle-orm'
 
 import type { AppDatabase } from '#/lib/db/connection'
 import {
@@ -164,6 +164,41 @@ export class WorkspaceRepository {
     return rows.map(toPageSummary)
   }
 
+  /**
+   * Find pages whose title, slug, or block content matches `query`. The outer
+   * organization filter keeps the block-content subquery scoped to this org.
+   */
+  async searchPages(
+    query: string,
+    limit: number,
+  ): Promise<WorkspacePageSummary[]> {
+    const term = `%${query}%`
+
+    const pageIdsWithMatchingContent = this.db
+      .select({ pageId: blockTable.pageId })
+      .from(blockTable)
+      .where(like(blockTable.content, term))
+
+    const rows = await this.db
+      .select()
+      .from(pageTable)
+      .where(
+        and(
+          eq(pageTable.organizationId, this.ctx.organizationId),
+          eq(pageTable.isArchived, false),
+          or(
+            like(pageTable.title, term),
+            like(pageTable.slug, term),
+            inArray(pageTable.id, pageIdsWithMatchingContent),
+          ),
+        ),
+      )
+      .orderBy(asc(pageTable.position))
+      .limit(limit)
+
+    return rows.map(toPageSummary)
+  }
+
   async getPage(slug: string): Promise<WorkspacePage | null> {
     const [pageRow] = await this.db
       .select()
@@ -193,6 +228,21 @@ export class WorkspaceRepository {
       .limit(1)
 
     return pageRow ? this.assemblePage(pageRow) : null
+  }
+
+  /** Load a single database (schema, rows, views) by id, scoped to the org. */
+  async getDatabaseById(databaseId: string): Promise<WorkspaceDatabase | null> {
+    await this.assertDatabaseInOrg(databaseId)
+
+    const ownerBlocks = await this.db
+      .select()
+      .from(blockTable)
+      .where(eq(blockTable.collectionId, databaseId))
+      .limit(1)
+
+    const [database] = await this.loadDatabases([databaseId], ownerBlocks)
+
+    return database ?? null
   }
 
   private async assemblePage(

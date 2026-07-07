@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 
 import { auth } from '#/lib/auth'
 import { db } from '#/lib/db/connection'
-import { member } from '#/lib/db/schema'
+import { member, organization } from '#/lib/db/schema'
 
 import type { WorkspaceAccess } from './access'
 import type { WorkspaceContext } from './repository'
@@ -51,6 +51,32 @@ async function organizationForUser(userId: string): Promise<string | null> {
     .limit(1)
 
   return membership?.organizationId ?? null
+}
+
+export type McpWorkspaceMembership = {
+  id: string
+  name: string
+  slug: string
+  role: string
+}
+
+/**
+ * Every workspace (organization) the user belongs to, with their role. Powers
+ * the MCP `list_workspaces` tool and per-call `workspaceId` membership checks.
+ */
+export async function listUserWorkspaces(
+  userId: string,
+): Promise<McpWorkspaceMembership[]> {
+  return db
+    .select({
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      role: member.role,
+    })
+    .from(member)
+    .innerJoin(organization, eq(member.organizationId, organization.id))
+    .where(eq(member.userId, userId))
 }
 
 /**
