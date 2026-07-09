@@ -30,11 +30,33 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       {
         title: 'Potion Workspace',
       },
+      {
+        name: 'theme-color',
+        content: '#6d4b7c',
+      },
     ],
     links: [
       {
         rel: 'stylesheet',
         href: appCss,
+      },
+      {
+        rel: 'icon',
+        href: '/icon.svg',
+        type: 'image/svg+xml',
+      },
+      {
+        rel: 'icon',
+        href: '/favicon.ico',
+        sizes: '48x48',
+      },
+      {
+        rel: 'apple-touch-icon',
+        href: '/logo192.png',
+      },
+      {
+        rel: 'manifest',
+        href: '/manifest.json',
       },
     ],
   }),
