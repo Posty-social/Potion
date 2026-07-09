@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import type { WorkspacePage, WorkspacePageSummary } from '#/lib/workspace/types'
+import type {
+  DatabaseProperty,
+  WorkspacePage,
+  WorkspacePageSummary,
+} from '#/lib/workspace/types'
 
 import { resolveMcpHttpRequest, type McpRepository } from './tools'
 
@@ -45,6 +49,7 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
     }),
     makePage({ slug: 'deployment-handoff', title: 'Deployment handoff' }),
   ]
+  const catalog: DatabaseProperty[] = []
 
   const toSummary = (page: WorkspacePage): WorkspacePageSummary => ({
     id: page.id,
@@ -141,6 +146,84 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
       })
       pages.push(page)
       return toSummary(page)
+    },
+    // Page properties. The catalog holds shared definitions; a page's
+    // `properties` array holds the SAME object references, so mutating a
+    // definition's options is reflected on every page that uses it (mirroring
+    // the real workspace_property catalog).
+    async listWorkspaceProperties() {
+      return catalog
+    },
+    async addPageProperty(input) {
+      const property: DatabaseProperty = {
+        id: `prop_${catalog.length + 1}`,
+        name: input.name,
+        type: input.type,
+        options: [],
+      }
+      catalog.push(property)
+      pages.find((page) => page.id === input.pageId)?.properties.push(property)
+      return { propertyId: property.id }
+    },
+    async attachPageProperty(input) {
+      const property = catalog.find((p) => p.id === input.propertyId)
+      const page = pages.find((candidate) => candidate.id === input.pageId)
+      if (
+        property &&
+        page &&
+        !page.properties.some((p) => p.id === property.id)
+      ) {
+        page.properties.push(property)
+      }
+      return { ok: true as const }
+    },
+    async updatePageProperty(input) {
+      const property = catalog.find((p) => p.id === input.propertyId)
+      if (property && input.name !== undefined) {
+        property.name = input.name
+      }
+      return { ok: true as const }
+    },
+    async deletePageProperty(input) {
+      const page = pages.find((candidate) => candidate.id === input.pageId)
+      if (page) {
+        page.properties = page.properties.filter(
+          (p) => p.id !== input.propertyId,
+        )
+        delete page.propertyValues[input.propertyId]
+      }
+      return { ok: true as const }
+    },
+    async setPagePropertyValue(input) {
+      const page = pages.find((candidate) => candidate.id === input.pageId)
+      if (page) {
+        page.propertyValues[input.propertyId] = input.value
+      }
+      return { ok: true as const }
+    },
+    async addPagePropertyOption(input) {
+      const property = catalog.find((p) => p.id === input.propertyId)
+      const optionId = `opt_${(property?.options?.length ?? 0) + 1}`
+      property?.options?.push({ id: optionId, name: input.name, color: '#fff' })
+      return { optionId }
+    },
+    async renamePagePropertyOption(input) {
+      const option = catalog
+        .find((p) => p.id === input.propertyId)
+        ?.options?.find((o) => o.id === input.optionId)
+      if (option) {
+        option.name = input.name
+      }
+      return { ok: true as const }
+    },
+    async deletePagePropertyOption(input) {
+      const property = catalog.find((p) => p.id === input.propertyId)
+      if (property?.options) {
+        property.options = property.options.filter(
+          (o) => o.id !== input.optionId,
+        )
+      }
+      return { ok: true as const }
     },
   }
 }
@@ -362,6 +445,69 @@ describe('MCP workspace tools', () => {
       tools.find((tool) => tool.name === 'delete_page')?.annotations
         ?.destructiveHint,
     ).toBe(true)
+  })
+
+  it('shares page property definitions across pages via the catalog', async () => {
+    const repository = createFakeRepository()
+    const context = { repository }
+    const call = (id: number, name: string, args: Record<string, unknown>) =>
+      resolveMcpHttpRequest(
+        {
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: { name, arguments: args },
+        },
+        context,
+      )
+
+    // Create a shared multi_select property on page A.
+    const added = (await call(20, 'add_page_property', {
+      pageId: 'page_private-workspace',
+      name: 'Tags',
+      type: 'multi_select',
+    })) as { body: { result: { structuredContent: { propertyId: string } } } }
+    const propertyId = added.body.result.structuredContent.propertyId
+
+    // Attach the same property to page B and add an option through page B.
+    await call(21, 'attach_page_property', {
+      pageId: 'page_deployment-handoff',
+      propertyId,
+    })
+    const optioned = (await call(22, 'add_property_option', {
+      pageId: 'page_deployment-handoff',
+      propertyId,
+      name: 'urgent',
+    })) as { body: { result: { structuredContent: { optionId: string } } } }
+    const optionId = optioned.body.result.structuredContent.optionId
+
+    // The catalog lists the shared property...
+    const listed = (await call(23, 'list_workspace_properties', {})) as {
+      body: {
+        result: { structuredContent: { properties: DatabaseProperty[] } }
+      }
+    }
+    expect(listed.body.result.structuredContent.properties).toHaveLength(1)
+
+    // ...and page A (which never touched the option) sees it, proving sharing.
+    const pageA = repository.pages.find(
+      (p) => p.id === 'page_private-workspace',
+    )
+    const shared = pageA?.properties.find((p) => p.id === propertyId)
+    expect(shared?.options?.map((o) => o.id)).toContain(optionId)
+
+    // Setting and removing a value on page A works too.
+    await call(24, 'set_page_property', {
+      pageId: 'page_private-workspace',
+      propertyId,
+      value: [optionId],
+    })
+    expect(pageA?.propertyValues[propertyId]).toEqual([optionId])
+    await call(25, 'remove_page_property', {
+      pageId: 'page_private-workspace',
+      propertyId,
+    })
+    expect(pageA?.properties.some((p) => p.id === propertyId)).toBe(false)
   })
 
   it('lists and reads pages as resources', async () => {

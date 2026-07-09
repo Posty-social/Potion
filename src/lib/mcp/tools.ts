@@ -5,18 +5,26 @@ import {
   type WorkspaceRepository,
 } from '#/lib/workspace/repository'
 import {
+  addPagePropertyOptionSchema,
+  addPagePropertySchema,
   addRowSchema,
+  attachPagePropertySchema,
   createBlockSchema,
   createPageSchema,
   deleteBlockSchema,
+  deletePagePropertyOptionSchema,
+  deletePagePropertySchema,
   deletePageSchema,
   deleteRowSchema,
   getPageSchema,
   importTextSchema,
+  renamePagePropertyOptionSchema,
   renamePageSchema,
   setBlockCheckedSchema,
   setPageIconSchema,
+  setPagePropertyValueSchema,
   updateBlockSchema,
+  updatePagePropertySchema,
   updateRowSchema,
 } from '#/lib/workspace/schemas'
 
@@ -39,6 +47,15 @@ export type McpRepository = Pick<
   | 'updateRow'
   | 'deleteRow'
   | 'importText'
+  | 'listWorkspaceProperties'
+  | 'addPageProperty'
+  | 'attachPageProperty'
+  | 'updatePageProperty'
+  | 'deletePageProperty'
+  | 'setPagePropertyValue'
+  | 'addPagePropertyOption'
+  | 'renamePagePropertyOption'
+  | 'deletePagePropertyOption'
 >
 
 const mcpToolNames = [
@@ -58,6 +75,15 @@ const mcpToolNames = [
   'update_row',
   'delete_row',
   'import_text',
+  'list_workspace_properties',
+  'add_page_property',
+  'attach_page_property',
+  'update_page_property',
+  'remove_page_property',
+  'set_page_property',
+  'add_property_option',
+  'rename_property_option',
+  'remove_property_option',
 ] as const
 
 export type McpToolName = (typeof mcpToolNames)[number]
@@ -102,6 +128,23 @@ const searchPagesInputSchema = z.object({
   limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
 })
 const readDatabaseInputSchema = z.object({ databaseId: z.string().min(1) })
+// The property types a page property can be (mirrors propertyTypeSchema;
+// select/multi_select/status carry options).
+const PROPERTY_TYPE_VALUES = [
+  'text',
+  'number',
+  'select',
+  'multi_select',
+  'status',
+  'date',
+  'person',
+  'checkbox',
+  'url',
+  'email',
+  'phone',
+  'created_time',
+  'last_edited_time',
+] as const
 const legacyToolRequestSchema = z.object({
   tool: mcpToolNameSchema,
   input: z.unknown().optional(),
@@ -394,6 +437,161 @@ export const mcpToolDefinitions = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'list_workspace_properties',
+    description:
+      'List the workspace-wide catalog of page property definitions (id, name, type, options). Property definitions are shared across pages — attach one to a page with attach_page_property; its options are shared everywhere it is used.',
+    annotations: { title: 'List workspace properties', readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: { ...workspaceIdProperty },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_page_property',
+    description:
+      'Create a new shared property and attach it to a page. Prefer attach_page_property when a matching property already exists (see list_workspace_properties) so pages reuse definitions and options.',
+    annotations: { title: 'Add page property' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        type: { type: 'string', enum: [...PROPERTY_TYPE_VALUES] },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'name', 'type'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'attach_page_property',
+    description:
+      'Attach an existing shared property (by id, from list_workspace_properties) to a page.',
+    annotations: { title: 'Attach page property', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_page_property',
+    description:
+      "Rename or retype a shared property. This changes the definition everywhere it's used, not just on this page.",
+    annotations: { title: 'Update page property', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        type: { type: 'string', enum: [...PROPERTY_TYPE_VALUES] },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'remove_page_property',
+    description:
+      "Remove a property from a page (and clear this page's value for it). The shared definition stays in the catalog for other pages.",
+    annotations: { title: 'Remove page property', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_page_property',
+    description:
+      'Set a page property value. `value` depends on the property type: text/url/email/phone/date/person = string, number = number, checkbox = boolean, select/status = option id, multi_select = array of option ids, or null to clear. Get property and option ids from read_page.',
+    annotations: { title: 'Set page property value', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        value: {
+          type: ['string', 'number', 'boolean', 'array', 'null'],
+          items: { type: 'string' },
+          description: 'The cell value; shape depends on the property type.',
+        },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId', 'value'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_property_option',
+    description:
+      'Add a select option to a select/multi_select/status property. The option is shared across every page that uses the property.',
+    annotations: { title: 'Add property option' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId', 'name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'rename_property_option',
+    description:
+      'Rename a select option (shared across every page that uses the property).',
+    annotations: { title: 'Rename property option', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        optionId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId', 'optionId', 'name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'remove_property_option',
+    description:
+      'Delete a select option (removes it everywhere the property is used and clears it from this page value). This cannot be undone.',
+    annotations: {
+      title: 'Remove property option',
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        propertyId: { type: 'string' },
+        optionId: { type: 'string' },
+        ...workspaceIdProperty,
+      },
+      required: ['pageId', 'propertyId', 'optionId'],
+      additionalProperties: false,
+    },
+  },
 ] satisfies Array<{
   name: McpToolName
   description: string
@@ -413,8 +611,13 @@ const serverInstructions = [
   'Call list_workspaces first if the user may have more than one workspace;',
   'pass a workspaceId to any tool to act there, or omit it to use the primary',
   'workspace. Read a page with read_page (by slug) and a database with',
-  'read_database (by id, found on database blocks). Writes are scoped to the',
-  'chosen workspace; delete_* tools are destructive and cannot be undone.',
+  'read_database (by id, found on database blocks). Pages have Notion-style',
+  'properties whose definitions are shared workspace-wide: list_workspace_properties',
+  'shows the catalog, attach_page_property reuses one on a page, add_page_property',
+  'creates a new one, and set_page_property sets a value (ids come from read_page).',
+  'Editing a shared property or its select options changes it on every page that',
+  'uses it. Writes are scoped to the chosen workspace; delete/remove tools are',
+  'destructive and cannot be undone.',
 ].join(' ')
 
 // Pages are also exposed as MCP resources for the primary workspace.
@@ -748,6 +951,68 @@ export async function callMcpTool(
   if (tool === 'delete_row') {
     const data = deleteRowSchema.parse(rest ?? {})
     const result = await repository.deleteRow(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'list_workspace_properties') {
+    const properties = await repository.listWorkspaceProperties()
+
+    return toolResult({ properties })
+  }
+
+  if (tool === 'add_page_property') {
+    const data = addPagePropertySchema.parse(rest ?? {})
+    const result = await repository.addPageProperty(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'attach_page_property') {
+    const data = attachPagePropertySchema.parse(rest ?? {})
+    const result = await repository.attachPageProperty(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'update_page_property') {
+    const data = updatePagePropertySchema.parse(rest ?? {})
+    const result = await repository.updatePageProperty(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'remove_page_property') {
+    const data = deletePagePropertySchema.parse(rest ?? {})
+    const result = await repository.deletePageProperty(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'set_page_property') {
+    const data = setPagePropertyValueSchema.parse(rest ?? {})
+    const result = await repository.setPagePropertyValue(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'add_property_option') {
+    const data = addPagePropertyOptionSchema.parse(rest ?? {})
+    const result = await repository.addPagePropertyOption(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'rename_property_option') {
+    const data = renamePagePropertyOptionSchema.parse(rest ?? {})
+    const result = await repository.renamePagePropertyOption(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'remove_property_option') {
+    const data = deletePagePropertyOptionSchema.parse(rest ?? {})
+    const result = await repository.deletePagePropertyOption(data)
 
     return toolResult(result)
   }
