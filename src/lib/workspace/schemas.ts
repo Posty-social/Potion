@@ -41,6 +41,7 @@ export const propertyTypeSchema = z.enum([
   'url',
   'email',
   'phone',
+  'page',
   'created_time',
   'last_edited_time',
 ])

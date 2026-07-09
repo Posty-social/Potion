@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import {
   createColumnHelper,
   flexRender,
@@ -15,6 +16,7 @@ import {
   ChevronRightIcon,
   CircleDotIcon,
   ClockIcon,
+  FileTextIcon,
   GalleryVerticalEndIcon,
   HashIcon,
   HistoryIcon,
@@ -66,7 +68,10 @@ import {
 import { Input } from '#/components/ui/input'
 import { Sheet, SheetContent, SheetTitle } from '#/components/ui/sheet'
 import { cn } from '#/lib/utils'
-import { workspaceMembersQuery } from '#/lib/workspace/functions'
+import {
+  workspaceMembersQuery,
+  workspacePagesQuery,
+} from '#/lib/workspace/functions'
 import { Markdown } from '#/lib/workspace/markdown'
 import {
   COMPUTED_PROPERTY_TYPES,
@@ -111,6 +116,7 @@ export const ADDABLE_TYPES: Array<Exclude<PropertyType, 'title'>> = [
   'person',
   'checkbox',
   'url',
+  'page',
 ]
 
 const optionById = (property: DatabaseProperty, id: unknown) =>
@@ -131,6 +137,7 @@ export const PROPERTY_TYPE_ICONS: Record<PropertyType, typeof TextIcon> = {
   url: LinkIcon,
   email: AtSignIcon,
   phone: PhoneIcon,
+  page: FileTextIcon,
   created_time: ClockIcon,
   last_edited_time: HistoryIcon,
 }
@@ -1415,6 +1422,97 @@ function PersonPicker({
   )
 }
 
+/**
+ * `page` editor: links to another workspace page. Stores the page id; the
+ * cell shows the page's icon + title as a real link, with the space beside it
+ * opening a searchable picker.
+ */
+function PageLinkPicker({
+  property,
+  value,
+  onSave,
+}: {
+  property: DatabaseProperty
+  value: CellValue
+  onSave: (next: CellValue) => void
+}) {
+  const { data: pages } = useQuery(workspacePagesQuery())
+  const [query, setQuery] = useState('')
+  const selected = pages?.find((page) => page.id === value)
+  const trimmed = query.trim().toLowerCase()
+  const filtered = (pages ?? []).filter((page) =>
+    trimmed ? page.title.toLowerCase().includes(trimmed) : true,
+  )
+
+  return (
+    <div className="flex min-h-9 w-full items-center">
+      {selected ? (
+        <Link
+          to="/p/$pageSlug"
+          params={{ pageSlug: selected.slug }}
+          className="ml-3 inline-flex max-w-[70%] items-center gap-1 truncate rounded px-1 py-0.5 text-sm text-[var(--workspace-ink)] underline decoration-[var(--workspace-line)] underline-offset-2 hover:bg-[var(--workspace-hover)]"
+        >
+          <span className="shrink-0">{selected.icon}</span>
+          <span className="truncate">{selected.title || 'Untitled'}</span>
+        </Link>
+      ) : null}
+      <DropdownMenu onOpenChange={(open) => !open && setQuery('')}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={
+              selected ? `Change ${property.name}` : `Set ${property.name}`
+            }
+            className="flex h-9 min-w-0 flex-1 cursor-pointer items-center px-3 text-left text-sm text-[var(--workspace-ink-soft)] transition-colors hover:bg-[var(--workspace-muted)]"
+          >
+            {selected ? '' : 'Empty'}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64 p-2">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            placeholder="Search pages…"
+            className="mb-1.5 h-8 w-full rounded-md border border-[var(--workspace-line)] px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-plum)]/40"
+            aria-label="Search pages"
+          />
+          <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
+            {filtered.map((page) => (
+              <button
+                key={page.id}
+                type="button"
+                onClick={() => onSave(page.id)}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--workspace-hover)]"
+              >
+                <span className="shrink-0">{page.icon}</span>
+                <span
+                  className={cn('truncate', page.id === value && 'font-bold')}
+                >
+                  {page.title || 'Untitled'}
+                </span>
+              </button>
+            ))}
+            {filtered.length === 0 ? (
+              <p className="px-2 py-1.5 text-sm text-[var(--workspace-ink-soft)]">
+                No pages match.
+              </p>
+            ) : null}
+          </div>
+          {selected ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onSave(null)}>
+                Clear
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
 export function PropertyEditor({
   property,
   value,
@@ -1462,6 +1560,10 @@ export function PropertyEditor({
 
   if (property.type === 'person') {
     return <PersonPicker property={property} value={value} onSave={onSave} />
+  }
+
+  if (property.type === 'page') {
+    return <PageLinkPicker property={property} value={value} onSave={onSave} />
   }
 
   const inputType =

@@ -184,6 +184,7 @@ export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   url: 'URL',
   email: 'Email',
   phone: 'Phone',
+  page: 'Page link',
   created_time: 'Created time',
   last_edited_time: 'Last edited time',
 }

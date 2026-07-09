@@ -142,6 +142,7 @@ const PROPERTY_TYPE_VALUES = [
   'url',
   'email',
   'phone',
+  'page',
   'created_time',
   'last_edited_time',
 ] as const
@@ -518,7 +519,7 @@ export const mcpToolDefinitions = [
   {
     name: 'set_page_property',
     description:
-      'Set a page property value. `value` depends on the property type: text/url/email/phone/date = string, person = array of workspace member user ids, number = number, checkbox = boolean, select/status = option id, multi_select = array of option ids, or null to clear. Get property and option ids from read_page.',
+      'Set a page property value. `value` depends on the property type: text/url/email/phone/date = string, person = array of workspace member user ids, page = a workspace page id (a link to that page), number = number, checkbox = boolean, select/status = option id, multi_select = array of option ids, or null to clear. Get property and option ids from read_page.',
     annotations: { title: 'Set page property value', idempotentHint: true },
     inputSchema: {
       type: 'object',
