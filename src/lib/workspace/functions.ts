@@ -39,6 +39,7 @@ import {
   renameDatabaseSchema,
   renamePagePropertyOptionSchema,
   renamePageSchema,
+  searchPagesSchema,
   renamePropertyOptionSchema,
   renameViewSchema,
   setBlockCheckedSchema,
@@ -81,6 +82,18 @@ export const listWorkspaceProperties = createServerFn({
 export const listWorkspaceMembers = createServerFn({ method: 'GET' }).handler(
   async () => (await requireRepository()).listMembers(),
 )
+
+// Quick-switcher search: matches page titles, slugs, and block content.
+export const searchWorkspacePages = createServerFn({ method: 'GET' })
+  .validator(searchPagesSchema)
+  .handler(async ({ data }) => {
+    const repository = await requireRepository()
+    const query = data.query.trim()
+
+    return query
+      ? repository.searchPages(query, 12)
+      : (await repository.listPages()).slice(0, 12)
+  })
 
 export const getWorkspacePage = createServerFn({ method: 'GET' })
   .validator(getPageSchema)
@@ -359,4 +372,11 @@ export const workspaceMembersQuery = () =>
   queryOptions({
     queryKey: ['workspace', 'members'],
     queryFn: () => listWorkspaceMembers(),
+  })
+
+/** Quick-switcher (⌘K) page search, keyed per query string. */
+export const workspaceSearchQuery = (query: string) =>
+  queryOptions({
+    queryKey: ['workspace', 'search', query],
+    queryFn: () => searchWorkspacePages({ data: { query } }),
   })

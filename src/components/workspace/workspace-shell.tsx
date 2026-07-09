@@ -56,6 +56,7 @@ import type {
   WorkspacePageSummary,
 } from '#/lib/workspace/types'
 
+import { CommandMenu } from './command-menu'
 import { DatabaseElement } from './database-element'
 import { PageProperties } from './page-properties'
 import { usePageRealtime, type PageDocViewer } from './use-page-realtime'
@@ -97,6 +98,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
 
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <CommandMenu onNewPage={() => void createTopLevelPage()} />
       <Sidebar
         pages={pages}
         activeSlug={page.slug}
@@ -180,9 +182,12 @@ function Sidebar({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-8 pl-8"
+            className="h-8 pr-10 pl-8"
             placeholder="Search pages"
           />
+          <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-[var(--workspace-line)] bg-[var(--workspace-muted)] px-1 font-sans text-[10px] text-[var(--workspace-ink-soft)]">
+            ⌘K
+          </kbd>
         </div>
       </div>
 

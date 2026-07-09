@@ -210,6 +210,7 @@ export const updatePagePropertySchema = z.object({
   type: propertyTypeSchema.optional(),
 })
 export const attachPagePropertySchema = z.object({ pageId: id, propertyId: id })
+export const searchPagesSchema = z.object({ query: z.string().max(120) })
 export const deletePagePropertySchema = z.object({ pageId: id, propertyId: id })
 export const setPagePropertyValueSchema = z.object({
   pageId: id,
