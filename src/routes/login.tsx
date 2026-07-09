@@ -74,9 +74,13 @@ function LoginRoute() {
     <main className="flex min-h-screen items-center justify-center px-4">
       <section className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-[var(--workspace-line)] bg-[var(--workspace-paper)] p-7 shadow-sm">
         <div className="flex flex-col gap-1.5">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--accent-plum)] text-lg font-bold text-white">
-            P
-          </div>
+          <img
+            src="/icon.svg"
+            alt="Potion"
+            width={40}
+            height={40}
+            className="size-10 rounded-lg"
+          />
           <h1 className="display-title mt-2 text-2xl font-bold">
             {mode === 'signin' ? 'Welcome back' : 'Create your workspace'}
           </h1>

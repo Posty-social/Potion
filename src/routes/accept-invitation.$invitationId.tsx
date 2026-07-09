@@ -102,9 +102,13 @@ function AcceptInvitationRoute() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <section className="flex w-full max-w-md flex-col gap-5 rounded-xl border border-[var(--workspace-line)] bg-[var(--workspace-paper)] p-7 shadow-sm">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--accent-plum)] text-lg font-bold text-white">
-          P
-        </div>
+        <img
+          src="/icon.svg"
+          alt="Potion"
+          width={40}
+          height={40}
+          className="size-10 rounded-lg"
+        />
 
         {isPending ? (
           <p className="text-muted-foreground text-sm">Loading invitation…</p>
