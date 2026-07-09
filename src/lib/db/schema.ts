@@ -121,9 +121,13 @@ export const page = sqliteTable(
     coverAssetId: text('cover_asset_id').references(() => asset.id, {
       onDelete: 'set null',
     }),
-    // Notion-style page properties: a per-page schema of typed properties plus
-    // the values keyed by property id. Empty for a plain page.
-    properties: jsonText<CollectionField[]>('properties')
+    // Notion-style page properties. The property *definitions* (name, type,
+    // options) live in the shared `workspace_property` catalog so pages reuse
+    // each other's properties and select options; this column stores the
+    // ordered list of attached catalog property ids. (Legacy rows may hold full
+    // definition objects — the repository backfills those into the catalog on
+    // read.) Values are keyed by property id.
+    properties: jsonText<string[]>('properties')
       .notNull()
       .default(sql`'[]'`),
     propertyValues: jsonText<JsonRecord>('property_values')
@@ -155,6 +159,27 @@ export const page = sqliteTable(
     ),
     uniqueIndex('page_org_slug_idx').on(table.organizationId, table.slug),
   ],
+)
+
+// Workspace-wide catalog of Notion-style property definitions shared across
+// pages. A page attaches a property by id (see `page.properties`); editing a
+// property's name/type/options here is reflected on every page that uses it.
+export const workspaceProperty = sqliteTable(
+  'workspace_property',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    options: jsonText<NonNullable<CollectionField['options']>>('options')
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+  },
+  (table) => [index('workspace_property_org_id_idx').on(table.organizationId)],
 )
 
 export const collection = sqliteTable(

@@ -29,6 +29,13 @@
       "when": 1783466707678,
       "tag": "0003_careful_multiple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1783580333649,
+      "tag": "0004_unknown_mastermind",
+      "breakpoints": true
     }
   ]
 }

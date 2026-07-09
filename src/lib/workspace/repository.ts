@@ -7,6 +7,7 @@ import {
   collectionRow as collectionRowTable,
   collectionView as collectionViewTable,
   page as pageTable,
+  workspaceProperty as workspacePropertyTable,
   type CollectionField as DbCollectionField,
   type CollectionViewConfig,
   type JsonRecord,
@@ -88,6 +89,24 @@ function toIso(value: Date | number | null): string {
 
 function pickColor(index: number): string {
   return FIELD_OPTION_COLORS[index % FIELD_OPTION_COLORS.length]
+}
+
+/** Map a shared catalog row to the UI property shape. */
+function catalogRowToProperty(
+  row: typeof workspacePropertyTable.$inferSelect,
+): DatabaseProperty {
+  const type = row.type as PropertyType
+  const property: DatabaseProperty = { id: row.id, name: row.name, type }
+
+  if (OPTION_PROPERTY_TYPES.includes(type)) {
+    property.options = (row.options ?? []).map((option, index) => ({
+      id: option.id,
+      name: option.name,
+      color: option.color ?? pickColor(index),
+    }))
+  }
+
+  return property
 }
 
 function titlePropertyId(properties: DatabaseProperty[]): string {
@@ -262,6 +281,7 @@ export class WorkspaceRepository {
       .map((block) => block.collectionId as string)
 
     const databases = await this.loadDatabases(databaseIds, blocks)
+    const properties = await this.resolveAttachedProperties(pageRow)
 
     const summaryById = new Map(summaries.map((page) => [page.id, page]))
     const ancestors: WorkspacePageSummary[] = []
@@ -282,7 +302,7 @@ export class WorkspaceRepository {
       databases,
       ancestors,
       childPages: summaries.filter((page) => page.parentPageId === pageRow.id),
-      properties: (pageRow.properties ?? []) as DatabaseProperty[],
+      properties,
       propertyValues: (pageRow.propertyValues ?? {}) as Record<
         string,
         CellValue
@@ -453,29 +473,61 @@ export class WorkspaceRepository {
   }
 
   // --- Page properties ---------------------------------------------------
-  // Notion-style properties shown at the top of a page. Each page owns its own
-  // schema (`page.properties`) and values (`page.propertyValues`); mechanics
-  // mirror the database property methods but scoped to a single page.
+  // Notion-style properties shown at the top of a page. Property *definitions*
+  // (name, type, options) live in the shared `workspace_property` catalog so
+  // pages reuse each other's properties and select options; a page's
+  // `properties` column stores the ordered ids of the catalog properties it has
+  // attached, and `propertyValues` holds this page's values keyed by that id.
+  // Editing a definition (rename/retype/options) is therefore shared across
+  // every page that attaches it; deleting a property only *detaches* it here.
+
+  /** Every shared property definition in the workspace, for the picker. */
+  async listWorkspaceProperties(): Promise<DatabaseProperty[]> {
+    const rows = await this.db
+      .select()
+      .from(workspacePropertyTable)
+      .where(eq(workspacePropertyTable.organizationId, this.ctx.organizationId))
+      .orderBy(asc(workspacePropertyTable.name))
+
+    return rows.map(catalogRowToProperty)
+  }
 
   async addPageProperty(input: {
     pageId: string
     name: string
     type: Exclude<PropertyType, 'title'>
   }): Promise<{ propertyId: string }> {
-    const { properties } = await this.readPageProperties(input.pageId)
-    const property: DatabaseProperty = {
-      id: newId('prop'),
+    const page = await this.assertPageInOrg(input.pageId)
+    const propertyId = newId('prop')
+
+    await this.db.insert(workspacePropertyTable).values({
+      id: propertyId,
+      organizationId: this.ctx.organizationId,
       name: input.name.trim() || 'Property',
       type: input.type,
+      options: [],
+    })
+
+    const ids = await this.attachedIds(page)
+    await this.writeAttachedIds(page.id, [...ids, propertyId])
+
+    return { propertyId }
+  }
+
+  /** Attach an existing workspace property (by id) to this page. */
+  async attachPageProperty(input: {
+    pageId: string
+    propertyId: string
+  }): Promise<{ ok: true }> {
+    const page = await this.assertPageInOrg(input.pageId)
+    await this.getCatalogProperty(input.propertyId)
+
+    const ids = await this.attachedIds(page)
+    if (!ids.includes(input.propertyId)) {
+      await this.writeAttachedIds(page.id, [...ids, input.propertyId])
     }
 
-    if (OPTION_PROPERTY_TYPES.includes(input.type)) {
-      property.options = []
-    }
-
-    await this.writePageProperties(input.pageId, [...properties, property])
-
-    return { propertyId: property.id }
+    return { ok: true }
   }
 
   async updatePageProperty(input: {
@@ -484,28 +536,31 @@ export class WorkspaceRepository {
     name?: string
     type?: Exclude<PropertyType, 'title'>
   }): Promise<{ ok: true }> {
-    const { properties } = await this.readPageProperties(input.pageId)
-    const property = properties.find((p) => p.id === input.propertyId)
+    await this.assertPageInOrg(input.pageId)
+    const row = await this.getCatalogProperty(input.propertyId)
 
-    if (!property) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Property not found.',
-      )
+    const patch: Partial<typeof workspacePropertyTable.$inferInsert> = {
+      updatedAt: new Date(),
     }
-
     if (input.name !== undefined) {
-      property.name = input.name.trim() || 'Property'
+      patch.name = input.name.trim() || 'Property'
+    }
+    if (input.type !== undefined && input.type !== row.type) {
+      patch.type = input.type
+      patch.options = OPTION_PROPERTY_TYPES.includes(input.type)
+        ? (row.options ?? [])
+        : []
     }
 
-    if (input.type !== undefined && input.type !== property.type) {
-      property.type = input.type
-      property.options = OPTION_PROPERTY_TYPES.includes(input.type)
-        ? (property.options ?? [])
-        : undefined
-    }
-
-    await this.writePageProperties(input.pageId, properties)
+    await this.db
+      .update(workspacePropertyTable)
+      .set(patch)
+      .where(
+        and(
+          eq(workspacePropertyTable.id, input.propertyId),
+          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+        ),
+      )
 
     return { ok: true }
   }
@@ -514,7 +569,10 @@ export class WorkspaceRepository {
     pageId: string
     propertyId: string
   }): Promise<{ ok: true }> {
-    const { page, properties } = await this.readPageProperties(input.pageId)
+    // Detach from this page only — the shared definition stays in the catalog
+    // for any other page that uses it.
+    const page = await this.assertPageInOrg(input.pageId)
+    const ids = await this.attachedIds(page)
     const values = {
       ...((page.propertyValues ?? {}) as Record<string, CellValue>),
     }
@@ -523,9 +581,7 @@ export class WorkspaceRepository {
     await this.db
       .update(pageTable)
       .set({
-        properties: properties.filter(
-          (p) => p.id !== input.propertyId,
-        ) as DbCollectionField[],
+        properties: ids.filter((id) => id !== input.propertyId),
         propertyValues: values as JsonRecord,
         updatedAt: new Date(),
         lastEditedByUserId: this.ctx.userId,
@@ -563,25 +619,23 @@ export class WorkspaceRepository {
     propertyId: string
     name: string
   }): Promise<{ optionId: string }> {
-    const { properties } = await this.readPageProperties(input.pageId)
-    const property = properties.find((p) => p.id === input.propertyId)
+    const row = await this.getCatalogProperty(input.propertyId)
 
-    if (!property || !OPTION_PROPERTY_TYPES.includes(property.type)) {
+    if (!OPTION_PROPERTY_TYPES.includes(row.type as PropertyType)) {
       throw new WorkspaceRepositoryError(
         'property_not_found',
         'Option property not found.',
       )
     }
 
-    const options = property.options ?? []
+    const options = row.options ?? []
     const option: PropertyOption = {
       id: newId('opt'),
       name: input.name.trim() || 'Option',
       color: pickColor(options.length),
     }
-    property.options = [...options, option]
 
-    await this.writePageProperties(input.pageId, properties)
+    await this.writeCatalogOptions(input.propertyId, [...options, option])
 
     return { optionId: option.id }
   }
@@ -592,20 +646,21 @@ export class WorkspaceRepository {
     optionId: string
     name: string
   }): Promise<{ ok: true }> {
-    const { properties } = await this.readPageProperties(input.pageId)
-    const option = properties
-      .find((p) => p.id === input.propertyId)
-      ?.options?.find((o) => o.id === input.optionId)
+    const row = await this.getCatalogProperty(input.propertyId)
+    const options = (row.options ?? []).map((option) =>
+      option.id === input.optionId
+        ? { ...option, name: input.name.trim() || 'Option' }
+        : option,
+    )
 
-    if (!option) {
+    if (!options.some((option) => option.id === input.optionId)) {
       throw new WorkspaceRepositoryError(
         'property_not_found',
         'Option not found.',
       )
     }
 
-    option.name = input.name.trim() || 'Option'
-    await this.writePageProperties(input.pageId, properties)
+    await this.writeCatalogOptions(input.propertyId, options)
 
     return { ok: true }
   }
@@ -615,18 +670,14 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
   }): Promise<{ ok: true }> {
-    const { page, properties } = await this.readPageProperties(input.pageId)
-    const property = properties.find((p) => p.id === input.propertyId)
+    const row = await this.getCatalogProperty(input.propertyId)
+    await this.writeCatalogOptions(
+      input.propertyId,
+      (row.options ?? []).filter((option) => option.id !== input.optionId),
+    )
 
-    if (!property?.options) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option not found.',
-      )
-    }
-
-    property.options = property.options.filter((o) => o.id !== input.optionId)
-
+    // Clear the removed option from this page's value.
+    const page = await this.assertPageInOrg(input.pageId)
     const values = {
       ...((page.propertyValues ?? {}) as Record<string, CellValue>),
     }
@@ -640,7 +691,6 @@ export class WorkspaceRepository {
     await this.db
       .update(pageTable)
       .set({
-        properties: properties as DbCollectionField[],
         propertyValues: values as JsonRecord,
         updatedAt: new Date(),
         lastEditedByUserId: this.ctx.userId,
@@ -650,33 +700,129 @@ export class WorkspaceRepository {
     return { ok: true }
   }
 
-  private async readPageProperties(pageId: string): Promise<{
-    page: typeof pageTable.$inferSelect
-    properties: DatabaseProperty[]
-  }> {
-    const page = await this.assertPageInOrg(pageId)
-    const properties = ((page.properties ?? []) as DatabaseProperty[]).map(
-      (property) => ({
-        ...property,
-        options: property.options?.map((option) => ({ ...option })),
-      }),
-    )
+  /** Load one catalog property, scoped to this workspace. */
+  private async getCatalogProperty(
+    propertyId: string,
+  ): Promise<typeof workspacePropertyTable.$inferSelect> {
+    const [row] = await this.db
+      .select()
+      .from(workspacePropertyTable)
+      .where(
+        and(
+          eq(workspacePropertyTable.id, propertyId),
+          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+        ),
+      )
+      .limit(1)
 
-    return { page, properties }
+    if (!row) {
+      throw new WorkspaceRepositoryError(
+        'property_not_found',
+        'Property not found.',
+      )
+    }
+
+    return row
   }
 
-  private async writePageProperties(
-    pageId: string,
-    properties: DatabaseProperty[],
+  private async writeCatalogOptions(
+    propertyId: string,
+    options: NonNullable<
+      (typeof workspacePropertyTable.$inferSelect)['options']
+    >,
   ): Promise<void> {
+    await this.db
+      .update(workspacePropertyTable)
+      .set({ options, updatedAt: new Date() })
+      .where(
+        and(
+          eq(workspacePropertyTable.id, propertyId),
+          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+        ),
+      )
+  }
+
+  private async writeAttachedIds(pageId: string, ids: string[]): Promise<void> {
     await this.db
       .update(pageTable)
       .set({
-        properties: properties as DbCollectionField[],
+        properties: ids,
         updatedAt: new Date(),
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(pageTable.id, pageId))
+  }
+
+  /** The catalog property ids attached to a page, backfilling legacy rows. */
+  private async attachedIds(
+    pageRow: typeof pageTable.$inferSelect,
+  ): Promise<string[]> {
+    const raw = (pageRow.properties ?? []) as unknown[]
+    if (raw.some((entry) => entry !== null && typeof entry === 'object')) {
+      await this.backfillLegacyProperties(pageRow, raw as DatabaseProperty[])
+      return (raw as DatabaseProperty[]).map((property) => property.id)
+    }
+    return raw as string[]
+  }
+
+  /**
+   * Resolve a page's attached property ids to their shared catalog definitions,
+   * preserving the page's order and dropping ids no longer in the catalog.
+   */
+  private async resolveAttachedProperties(
+    pageRow: typeof pageTable.$inferSelect,
+  ): Promise<DatabaseProperty[]> {
+    const ids = await this.attachedIds(pageRow)
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows = await this.db
+      .select()
+      .from(workspacePropertyTable)
+      .where(
+        and(
+          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+          inArray(workspacePropertyTable.id, ids),
+        ),
+      )
+    const byId = new Map(rows.map((row) => [row.id, catalogRowToProperty(row)]))
+
+    return ids
+      .map((id) => byId.get(id))
+      .filter(
+        (property): property is DatabaseProperty => property !== undefined,
+      )
+  }
+
+  /**
+   * One-time migration of a page that still stores full property definition
+   * objects: seed each into the catalog (id preserved so existing values keep
+   * working) and rewrite the page to store ids. Idempotent.
+   */
+  private async backfillLegacyProperties(
+    pageRow: typeof pageTable.$inferSelect,
+    legacy: DatabaseProperty[],
+  ): Promise<void> {
+    await Promise.all(
+      legacy.map((property) =>
+        this.db
+          .insert(workspacePropertyTable)
+          .values({
+            id: property.id,
+            organizationId: this.ctx.organizationId,
+            name: property.name,
+            type: property.type,
+            options: property.options ?? [],
+          })
+          .onConflictDoNothing(),
+      ),
+    )
+
+    await this.writeAttachedIds(
+      pageRow.id,
+      legacy.map((property) => property.id),
+    )
   }
 
   // --- Blocks ------------------------------------------------------------

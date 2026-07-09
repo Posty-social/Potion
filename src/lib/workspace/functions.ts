@@ -13,6 +13,7 @@ import {
 import {
   addPagePropertyOptionSchema,
   addPagePropertySchema,
+  attachPagePropertySchema,
   addPropertyOptionSchema,
   addPropertySchema,
   addRowSchema,
@@ -63,6 +64,10 @@ export const listWorkspacePages = createServerFn({ method: 'GET' }).handler(
   async () => (await requireRepository()).listPages(),
 )
 
+export const listWorkspaceProperties = createServerFn({
+  method: 'GET',
+}).handler(async () => (await requireRepository()).listWorkspaceProperties())
+
 export const getWorkspacePage = createServerFn({ method: 'GET' })
   .validator(getPageSchema)
   .handler(async ({ data }) => (await requireRepository()).getPage(data.slug))
@@ -107,6 +112,12 @@ export const addWorkspacePageProperty = createServerFn({ method: 'POST' })
   .validator(addPagePropertySchema)
   .handler(async ({ data }) =>
     (await requireRepository()).addPageProperty(data),
+  )
+
+export const attachWorkspacePageProperty = createServerFn({ method: 'POST' })
+  .validator(attachPagePropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).attachPageProperty(data),
   )
 
 export const updateWorkspacePageProperty = createServerFn({ method: 'POST' })
@@ -282,4 +293,11 @@ export const workspacePageQuery = (slug: string) =>
   queryOptions({
     queryKey: ['workspace', 'page', slug],
     queryFn: () => getWorkspacePage({ data: { slug } }),
+  })
+
+/** The workspace-wide catalog of shared property definitions (for the picker). */
+export const workspacePropertiesQuery = () =>
+  queryOptions({
+    queryKey: ['workspace', 'properties'],
+    queryFn: () => listWorkspaceProperties(),
   })

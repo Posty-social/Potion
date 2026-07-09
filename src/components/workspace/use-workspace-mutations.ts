@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react'
 import {
   addWorkspacePageProperty,
   addWorkspacePagePropertyOption,
+  attachWorkspacePageProperty,
   addWorkspaceProperty,
   addWorkspacePropertyOption,
   addWorkspaceRow,
@@ -43,6 +44,7 @@ import type {
   DatabaseViewType,
   PropertyType,
   WorkspaceBlockType,
+  WorkspacePage,
 } from '#/lib/workspace/types'
 
 type OptionPropertyType = Exclude<PropertyType, 'title'>
@@ -59,12 +61,34 @@ export function useWorkspaceMutations() {
     [queryClient],
   )
 
+  // Optimistically patch every cached copy of a page (keyed by slug) by id, so
+  // property edits feel instant instead of waiting on the server round-trip.
+  const patchPage = useCallback(
+    (pageId: string, update: (page: WorkspacePage) => WorkspacePage) => {
+      queryClient.setQueriesData<WorkspacePage | null>(
+        { queryKey: ['workspace', 'page'] },
+        (page) => (page && page.id === pageId ? update(page) : page),
+      )
+    },
+    [queryClient],
+  )
+
   return useMemo(() => {
     const run = async <T>(promise: Promise<T>): Promise<T> => {
       const result = await promise
       await invalidate()
 
       return result
+    }
+
+    // For optimistic writes: reconcile with server truth whether or not the
+    // request succeeds (a failure rolls the optimistic patch back).
+    const runReconcile = async <T>(promise: Promise<T>): Promise<T> => {
+      try {
+        return await promise
+      } finally {
+        await invalidate()
+      }
     }
 
     return {
@@ -84,19 +108,42 @@ export function useWorkspaceMutations() {
         name: string
         type: OptionPropertyType
       }) => run(addWorkspacePageProperty({ data: input })),
+      attachPageProperty: (input: { pageId: string; propertyId: string }) =>
+        run(attachWorkspacePageProperty({ data: input })),
       updatePageProperty: (input: {
         pageId: string
         propertyId: string
         name?: string
         type?: OptionPropertyType
       }) => run(updateWorkspacePageProperty({ data: input })),
-      deletePageProperty: (input: { pageId: string; propertyId: string }) =>
-        run(deleteWorkspacePageProperty({ data: input })),
+      deletePageProperty: (input: { pageId: string; propertyId: string }) => {
+        patchPage(input.pageId, (page) => {
+          const propertyValues = { ...page.propertyValues }
+          delete propertyValues[input.propertyId]
+          return {
+            ...page,
+            properties: page.properties.filter(
+              (property) => property.id !== input.propertyId,
+            ),
+            propertyValues,
+          }
+        })
+        return runReconcile(deleteWorkspacePageProperty({ data: input }))
+      },
       setPagePropertyValue: (input: {
         pageId: string
         propertyId: string
         value: CellValue
-      }) => run(setWorkspacePagePropertyValue({ data: input })),
+      }) => {
+        patchPage(input.pageId, (page) => ({
+          ...page,
+          propertyValues: {
+            ...page.propertyValues,
+            [input.propertyId]: input.value,
+          },
+        }))
+        return runReconcile(setWorkspacePagePropertyValue({ data: input }))
+      },
       addPagePropertyOption: (input: {
         pageId: string
         propertyId: string
@@ -211,7 +258,7 @@ export function useWorkspaceMutations() {
       deleteRow: (input: { rowId: string }) =>
         run(deleteWorkspaceRow({ data: input })),
     }
-  }, [invalidate])
+  }, [invalidate, patchPage])
 }
 
 export type WorkspaceMutations = ReturnType<typeof useWorkspaceMutations>

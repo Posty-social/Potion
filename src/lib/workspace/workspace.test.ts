@@ -9,6 +9,7 @@ import {
 import { createUniqueSlug, sanitizeImportedText } from './import'
 import { generateKeyBetween, keyAtEnd } from './ordering'
 import {
+  attachPagePropertySchema,
   cellValuesSchema,
   createPageSchema,
   getPageSchema,
@@ -54,6 +55,18 @@ describe('workspace input validation', () => {
     expect(getPageSchema.safeParse({ slug: 'Private Workspace' }).success).toBe(
       false,
     )
+  })
+
+  it('requires a page and property id to attach a shared property', () => {
+    expect(
+      attachPagePropertySchema.safeParse({
+        pageId: 'page_1',
+        propertyId: 'prop_1',
+      }).success,
+    ).toBe(true)
+    expect(
+      attachPagePropertySchema.safeParse({ pageId: 'page_1' }).success,
+    ).toBe(false)
   })
 
   it('requires a title when creating a page', () => {

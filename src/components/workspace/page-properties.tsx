@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { PlusIcon, Settings2Icon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 
@@ -11,6 +12,7 @@ import {
 } from '#/components/ui/dropdown-menu'
 import { Input } from '#/components/ui/input'
 import { cn } from '#/lib/utils'
+import { workspacePropertiesQuery } from '#/lib/workspace/functions'
 import {
   OPTION_PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
@@ -63,6 +65,15 @@ export function PageProperties({
   const optionsProperty =
     page.properties.find((p) => p.id === optionsPropertyId) ?? null
 
+  // Workspace-wide catalog of shared properties, minus the ones already on this
+  // page — offered in the "Add a property" picker so pages reuse each other's
+  // properties and select options.
+  const { data: catalog } = useQuery(workspacePropertiesQuery())
+  const attachedIds = new Set(page.properties.map((property) => property.id))
+  const availableProperties = (catalog ?? []).filter(
+    (property) => !attachedIds.has(property.id),
+  )
+
   return (
     <div className="mb-3 flex flex-col gap-1">
       {page.properties.map((property) => (
@@ -102,6 +113,10 @@ export function PageProperties({
       <PropertyTypePicker
         onAdd={(name, type) =>
           mutations.addPageProperty({ pageId: page.id, name, type })
+        }
+        existingProperties={availableProperties}
+        onPickExisting={(propertyId) =>
+          mutations.attachPageProperty({ pageId: page.id, propertyId })
         }
         trigger={
           <button
