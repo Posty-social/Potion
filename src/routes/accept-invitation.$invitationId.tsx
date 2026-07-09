@@ -1,5 +1,5 @@
+import { queryOptions, useMutation, useQuery } from '@tanstack/react-query'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
 
 import { Button } from '#/components/ui/button'
 import { authClient } from '#/lib/auth-client'
@@ -31,73 +31,73 @@ type InvitationDetails = {
   inviterEmail?: string | null
 }
 
+/** The invitation being considered, keyed by its id. */
+function invitationQuery(invitationId: string) {
+  return queryOptions({
+    queryKey: ['invitation', invitationId],
+    queryFn: async (): Promise<InvitationDetails> => {
+      const { data, error } = await authClient.organization.getInvitation({
+        query: { id: invitationId },
+      })
+      if (error || !data) {
+        throw new Error(
+          error?.message ??
+            'This invitation is no longer valid. Ask for a new one.',
+        )
+      }
+      return data as InvitationDetails
+    },
+    retry: false,
+  })
+}
+
 function AcceptInvitationRoute() {
   const { invitationId } = Route.useParams()
   const navigate = useNavigate()
 
-  const [invitation, setInvitation] = useState<InvitationDetails | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'accept' | 'reject' | null>(null)
+  const {
+    data: invitation,
+    isPending,
+    isError,
+    error: loadError,
+  } = useQuery(invitationQuery(invitationId))
 
-  useEffect(() => {
-    let cancelled = false
-
-    void authClient.organization
-      .getInvitation({ query: { id: invitationId } })
-      .then(({ data, error }) => {
-        if (cancelled) {
-          return
-        }
-        if (error || !data) {
-          setLoadError(
-            error?.message ??
-              'This invitation is no longer valid. Ask for a new one.',
-          )
-          return
-        }
-        setInvitation(data as InvitationDetails)
+  const acceptMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await authClient.organization.acceptInvitation({
+        invitationId,
       })
+      if (error) {
+        throw new Error(error.message ?? 'Could not accept the invitation.')
+      }
+      // Land the user in the workspace they just joined.
+      if (invitation) {
+        await authClient.organization.setActive({
+          organizationId: invitation.organizationId,
+        })
+      }
+      window.location.assign('/')
+    },
+  })
 
-    return () => {
-      cancelled = true
-    }
-  }, [invitationId])
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      await authClient.organization.rejectInvitation({ invitationId })
+      // A user who signed up to consider this invite has no personal workspace
+      // yet (we skip that at signup when an invite is pending). Declining means
+      // they go solo, so provision one and make it active before landing them
+      // in the app.
+      const { organizationId } = await ensurePersonalWorkspaceForCurrentUser()
+      if (organizationId) {
+        await authClient.organization.setActive({ organizationId })
+      }
+      window.location.assign('/')
+    },
+  })
 
-  const accept = async () => {
-    setBusy('accept')
-    setActionError(null)
-    const { error } = await authClient.organization.acceptInvitation({
-      invitationId,
-    })
-    if (error) {
-      setBusy(null)
-      setActionError(error.message ?? 'Could not accept the invitation.')
-      return
-    }
-    // Land the user in the workspace they just joined.
-    if (invitation) {
-      await authClient.organization.setActive({
-        organizationId: invitation.organizationId,
-      })
-    }
-    window.location.assign('/')
-  }
-
-  const reject = async () => {
-    setBusy('reject')
-    setActionError(null)
-    await authClient.organization.rejectInvitation({ invitationId })
-    // A user who signed up to consider this invite has no personal workspace
-    // yet (we skip that at signup when an invite is pending). Declining means
-    // they go solo, so provision one and make it active before landing them in
-    // the app.
-    const { organizationId } = await ensurePersonalWorkspaceForCurrentUser()
-    if (organizationId) {
-      await authClient.organization.setActive({ organizationId })
-    }
-    window.location.assign('/')
-  }
+  const busy = acceptMutation.isPending || rejectMutation.isPending
+  const actionError =
+    acceptMutation.error?.message ?? rejectMutation.error?.message ?? null
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
@@ -106,13 +106,15 @@ function AcceptInvitationRoute() {
           P
         </div>
 
-        {loadError ? (
+        {isPending ? (
+          <p className="text-muted-foreground text-sm">Loading invitation…</p>
+        ) : isError ? (
           <>
             <h1 className="display-title text-2xl font-bold">
               Invitation unavailable
             </h1>
             <p className="text-muted-foreground text-sm leading-6">
-              {loadError}
+              {loadError.message}
             </p>
             <Button
               variant="outline"
@@ -121,8 +123,6 @@ function AcceptInvitationRoute() {
               Go to your workspace
             </Button>
           </>
-        ) : !invitation ? (
-          <p className="text-muted-foreground text-sm">Loading invitation…</p>
         ) : (
           <>
             <div className="flex flex-col gap-1.5">
@@ -149,15 +149,15 @@ function AcceptInvitationRoute() {
             <div className="flex gap-2">
               <Button
                 className="flex-1"
-                onClick={() => void accept()}
-                disabled={busy !== null}
+                onClick={() => acceptMutation.mutate()}
+                disabled={busy}
               >
-                {busy === 'accept' ? 'Joining…' : 'Accept invitation'}
+                {acceptMutation.isPending ? 'Joining…' : 'Accept invitation'}
               </Button>
               <Button
                 variant="outline"
-                onClick={() => void reject()}
-                disabled={busy !== null}
+                onClick={() => rejectMutation.mutate()}
+                disabled={busy}
               >
                 Decline
               </Button>

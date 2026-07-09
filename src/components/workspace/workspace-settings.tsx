@@ -1,3 +1,4 @@
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckIcon,
   CopyIcon,
@@ -5,7 +6,7 @@ import {
   TrashIcon,
   UserPlusIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import { Avatar, AvatarFallback } from '#/components/ui/avatar'
 import { Badge } from '#/components/ui/badge'
@@ -133,42 +134,58 @@ type FullInvitation = {
   status: string
 }
 
+/**
+ * Members + pending invitations for a workspace. Keyed by workspace id so each
+ * workspace is cached independently and switching workspaces refetches; writes
+ * invalidate this key to refresh.
+ */
+function workspaceOrganizationQuery(workspaceId: string) {
+  return queryOptions({
+    queryKey: ['workspace', 'organization', workspaceId],
+    queryFn: async () => {
+      const { data, error } = await authClient.organization.getFullOrganization(
+        {
+          query: { organizationId: workspaceId },
+        },
+      )
+      if (error) {
+        throw new Error(error.message ?? 'Could not load workspace members.')
+      }
+      return {
+        members: (data?.members ?? []) as FullMember[],
+        invitations: ((data?.invitations ?? []) as FullInvitation[]).filter(
+          (invite) => invite.status === 'pending',
+        ),
+      }
+    },
+  })
+}
+
 export function MembersSettings({
   workspace,
 }: {
   workspace: WorkspaceSummary
 }) {
-  const [members, setMembers] = useState<FullMember[]>([])
-  const [invitations, setInvitations] = useState<FullInvitation[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const { data: session } = authClient.useSession()
-
-  const currentUserId = session?.user?.id
-  const currentRole = useMemo(
-    () => members.find((member) => member.userId === currentUserId)?.role,
-    [members, currentUserId],
+  const { data, isPending, isError, error } = useQuery(
+    workspaceOrganizationQuery(workspace.id),
   )
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: ['workspace', 'organization', workspace.id],
+    })
+
+  const members = data?.members ?? []
+  const invitations = data?.invitations ?? []
+  const currentUserId = session?.user?.id
+  const currentRole = members.find(
+    (member) => member.userId === currentUserId,
+  )?.role
   const canManage = currentRole === 'owner' || currentRole === 'admin'
 
-  const refresh = async () => {
-    const { data } = await authClient.organization.getFullOrganization({
-      query: { organizationId: workspace.id },
-    })
-    setMembers((data?.members ?? []) as FullMember[])
-    setInvitations(
-      ((data?.invitations ?? []) as FullInvitation[]).filter(
-        (invite) => invite.status === 'pending',
-      ),
-    )
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.id])
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center py-8 text-[var(--workspace-ink-soft)]">
         <Loader2Icon className="size-5 animate-spin" />
@@ -176,10 +193,18 @@ export function MembersSettings({
     )
   }
 
+  if (isError) {
+    return (
+      <p className="py-8 text-sm font-medium text-[var(--accent-rust)]">
+        {error.message}
+      </p>
+    )
+  }
+
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       {canManage ? (
-        <InviteForm workspace={workspace} onInvited={refresh} />
+        <InviteForm workspace={workspace} onInvited={invalidate} />
       ) : null}
 
       <div className="flex flex-col gap-1">
@@ -226,7 +251,7 @@ export function MembersSettings({
                       organizationId: workspace.id,
                       memberIdOrEmail: member.user.email,
                     })
-                    await refresh()
+                    await invalidate()
                   }}
                 >
                   <TrashIcon className="size-4" />
@@ -248,7 +273,7 @@ export function MembersSettings({
                 key={invite.id}
                 invite={invite}
                 canManage={canManage}
-                onCancelled={refresh}
+                onCancelled={invalidate}
               />
             ))}
           </div>
