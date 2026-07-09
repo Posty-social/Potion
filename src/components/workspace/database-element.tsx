@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import {
   createColumnHelper,
   flexRender,
@@ -45,6 +46,7 @@ import {
   type ReactNode,
 } from 'react'
 
+import { Avatar, AvatarFallback } from '#/components/ui/avatar'
 import { Button } from '#/components/ui/button'
 import { Checkbox } from '#/components/ui/checkbox'
 import {
@@ -64,11 +66,13 @@ import {
 import { Input } from '#/components/ui/input'
 import { Sheet, SheetContent, SheetTitle } from '#/components/ui/sheet'
 import { cn } from '#/lib/utils'
+import { workspaceMembersQuery } from '#/lib/workspace/functions'
 import { Markdown } from '#/lib/workspace/markdown'
 import {
   COMPUTED_PROPERTY_TYPES,
   OPTION_PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
+  initialsFor,
   type CellValue,
   type DatabaseFilter,
   type DatabaseProperty,
@@ -1297,6 +1301,81 @@ function OptionPicker({
   )
 }
 
+/**
+ * `person` editor: tags a workspace member. Stores the member's user id;
+ * legacy free-text values (from when person was a plain text field) still
+ * render as-is until replaced.
+ */
+function PersonPicker({
+  property,
+  value,
+  onSave,
+}: {
+  property: DatabaseProperty
+  value: CellValue
+  onSave: (next: CellValue) => void
+}) {
+  const { data: members } = useQuery(workspaceMembersQuery())
+  const selected = members?.find((member) => member.userId === value)
+  const display =
+    selected?.name ||
+    selected?.email ||
+    (typeof value === 'string' && value ? value : null)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={property.name}
+          className="flex min-h-9 w-full cursor-pointer items-center gap-1.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-[var(--workspace-muted)]"
+        >
+          {display ? (
+            <>
+              <Avatar className="size-5 rounded-full">
+                <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
+                  {initialsFor(
+                    selected?.name ?? display,
+                    selected?.email ?? display,
+                  )}
+                </AvatarFallback>
+              </Avatar>
+              <span className="truncate">{display}</span>
+            </>
+          ) : (
+            <span className="text-[var(--workspace-ink-soft)]">Empty</span>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-60">
+        {(members ?? []).map((member) => (
+          <DropdownMenuItem
+            key={member.userId}
+            onClick={() => onSave(member.userId)}
+          >
+            <Avatar className="size-5 rounded-full">
+              <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
+                {initialsFor(member.name, member.email)}
+              </AvatarFallback>
+            </Avatar>
+            <span className={cn(member.userId === value && 'font-bold')}>
+              {member.name || member.email}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        {value ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onSave(null)}>
+              Clear
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function PropertyEditor({
   property,
   value,
@@ -1340,6 +1419,10 @@ export function PropertyEditor({
         onSave={onSave}
       />
     )
+  }
+
+  if (property.type === 'person') {
+    return <PersonPicker property={property} value={value} onSave={onSave} />
   }
 
   const inputType =
