@@ -199,6 +199,8 @@ export const addPagePropertySchema = z.object({
   pageId: id,
   name: z.string().min(1).max(80),
   type: propertyTypeSchema,
+  // Client-generated id (optional) so optimistic UI knows the id upfront.
+  propertyId: id.optional(),
 })
 export const updatePagePropertySchema = z.object({
   pageId: id,
@@ -217,6 +219,8 @@ export const addPagePropertyOptionSchema = z.object({
   pageId: id,
   propertyId: id,
   name: z.string().min(1).max(80),
+  // Client-generated id (optional) so optimistic UI knows the id upfront.
+  optionId: id.optional(),
 })
 export const renamePagePropertyOptionSchema = z.object({
   pageId: id,

@@ -58,6 +58,15 @@ export type WorkspaceContext = {
   userId: string
 }
 
+/**
+ * Best-effort realtime hook: called after every successful write with the
+ * affected page id so live viewers of that page can be told to refetch.
+ * Implementations must never throw (realtime is not allowed to fail a write).
+ */
+export type WorkspaceNotifier = {
+  pageChanged: (pageId: string) => Promise<void> | void
+}
+
 export type WorkspaceBlockUpdate = {
   ok: true
   pageId: string
@@ -164,7 +173,30 @@ export class WorkspaceRepository {
   constructor(
     private readonly db: AppDatabase,
     private readonly ctx: WorkspaceContext,
+    private readonly notifier?: WorkspaceNotifier,
   ) {}
+
+  /** Tell live viewers of a page that it changed (no-op without a notifier). */
+  private async notifyPage(pageId: string | null | undefined): Promise<void> {
+    if (pageId) {
+      await this.notifier?.pageChanged(pageId)
+    }
+  }
+
+  /** Notify the page hosting a database (databases live on pages). */
+  private async notifyDatabase(databaseId: string): Promise<void> {
+    if (!this.notifier) {
+      return
+    }
+
+    const [row] = await this.db
+      .select({ pageId: collectionTable.pageId })
+      .from(collectionTable)
+      .where(eq(collectionTable.id, databaseId))
+      .limit(1)
+
+    await this.notifyPage(row?.pageId)
+  }
 
   // --- Pages -------------------------------------------------------------
 
@@ -447,6 +479,7 @@ export class WorkspaceRepository {
       .update(pageTable)
       .set({ title, updatedAt: now, lastEditedByUserId: this.ctx.userId })
       .where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ...toPageSummary(page), title, updatedAt: now.toISOString() }
   }
@@ -461,6 +494,7 @@ export class WorkspaceRepository {
       .update(pageTable)
       .set({ icon: input.icon, updatedAt: new Date() })
       .where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ok: true }
   }
@@ -468,6 +502,7 @@ export class WorkspaceRepository {
   async deletePage(input: { pageId: string }): Promise<{ ok: true }> {
     const page = await this.assertPageInOrg(input.pageId)
     await this.db.delete(pageTable).where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ok: true }
   }
@@ -496,9 +531,11 @@ export class WorkspaceRepository {
     pageId: string
     name: string
     type: Exclude<PropertyType, 'title'>
+    // Optional client-generated id so optimistic UI can know the id upfront.
+    propertyId?: string
   }): Promise<{ propertyId: string }> {
     const page = await this.assertPageInOrg(input.pageId)
-    const propertyId = newId('prop')
+    const propertyId = input.propertyId ?? newId('prop')
 
     await this.db.insert(workspacePropertyTable).values({
       id: propertyId,
@@ -561,6 +598,7 @@ export class WorkspaceRepository {
           eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
         ),
       )
+    await this.notifyPage(input.pageId)
 
     return { ok: true }
   }
@@ -587,6 +625,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ok: true }
   }
@@ -610,6 +649,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ok: true }
   }
@@ -618,6 +658,8 @@ export class WorkspaceRepository {
     pageId: string
     propertyId: string
     name: string
+    // Optional client-generated id so optimistic UI can know the id upfront.
+    optionId?: string
   }): Promise<{ optionId: string }> {
     const row = await this.getCatalogProperty(input.propertyId)
 
@@ -630,12 +672,13 @@ export class WorkspaceRepository {
 
     const options = row.options ?? []
     const option: PropertyOption = {
-      id: newId('opt'),
+      id: input.optionId ?? newId('opt'),
       name: input.name.trim() || 'Option',
       color: pickColor(options.length),
     }
 
     await this.writeCatalogOptions(input.propertyId, [...options, option])
+    await this.notifyPage(input.pageId)
 
     return { optionId: option.id }
   }
@@ -661,6 +704,7 @@ export class WorkspaceRepository {
     }
 
     await this.writeCatalogOptions(input.propertyId, options)
+    await this.notifyPage(input.pageId)
 
     return { ok: true }
   }
@@ -696,6 +740,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(pageTable.id, page.id))
+    await this.notifyPage(page.id)
 
     return { ok: true }
   }
@@ -751,6 +796,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(pageTable.id, pageId))
+    await this.notifyPage(pageId)
   }
 
   /** The catalog property ids attached to a page, backfilling legacy rows. */
@@ -938,6 +984,7 @@ export class WorkspaceRepository {
         updatedAt: new Date(),
       })
       .where(eq(blockTable.id, block.id))
+    await this.notifyPage(block.pageId)
 
     return { ok: true }
   }
@@ -971,6 +1018,7 @@ export class WorkspaceRepository {
       .update(collectionTable)
       .set({ title: input.title.trim() || 'Untitled', updatedAt: new Date() })
       .where(eq(collectionTable.id, database.id))
+    await this.notifyPage(database.pageId)
 
     return { ok: true }
   }
@@ -1003,6 +1051,7 @@ export class WorkspaceRepository {
       createdAt: new Date(),
       updatedAt: new Date(),
     })
+    await this.notifyPage(database.pageId)
 
     return { viewId }
   }
@@ -1028,6 +1077,7 @@ export class WorkspaceRepository {
         updatedAt: new Date(),
       })
       .where(eq(collectionViewTable.id, view.id))
+    await this.notifyPage(database.pageId)
 
     return { ok: true }
   }
@@ -1082,6 +1132,7 @@ export class WorkspaceRepository {
       .update(collectionViewTable)
       .set({ config: { ...config, ...patch }, updatedAt: new Date() })
       .where(eq(collectionViewTable.id, view.id))
+    await this.notifyDatabase(view.collectionId)
 
     return { ok: true }
   }
@@ -1096,6 +1147,7 @@ export class WorkspaceRepository {
       .update(collectionViewTable)
       .set({ name: input.name.trim() || 'View', updatedAt: new Date() })
       .where(eq(collectionViewTable.id, view.id))
+    await this.notifyDatabase(view.collectionId)
 
     return { ok: true }
   }
@@ -1117,6 +1169,7 @@ export class WorkspaceRepository {
     await this.db
       .delete(collectionViewTable)
       .where(eq(collectionViewTable.id, view.id))
+    await this.notifyDatabase(view.collectionId)
 
     return { ok: true }
   }
@@ -1138,6 +1191,7 @@ export class WorkspaceRepository {
         updatedAt: new Date(),
       })
       .where(eq(collectionViewTable.id, view.id))
+    await this.notifyDatabase(view.collectionId)
 
     return { ok: true }
   }
@@ -1359,6 +1413,7 @@ export class WorkspaceRepository {
       createdAt: now,
       updatedAt: now,
     })
+    await this.notifyDatabase(input.databaseId)
 
     return { rowId }
   }
@@ -1381,6 +1436,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(collectionRowTable.id, row.id))
+    await this.notifyDatabase(row.collectionId)
 
     return { ok: true }
   }
@@ -1400,6 +1456,7 @@ export class WorkspaceRepository {
         lastEditedByUserId: this.ctx.userId,
       })
       .where(eq(collectionRowTable.id, row.id))
+    await this.notifyDatabase(row.collectionId)
 
     return { ok: true }
   }
@@ -1409,6 +1466,7 @@ export class WorkspaceRepository {
     await this.db
       .delete(collectionRowTable)
       .where(eq(collectionRowTable.id, row.id))
+    await this.notifyDatabase(row.collectionId)
 
     return { ok: true }
   }
@@ -1571,6 +1629,7 @@ export class WorkspaceRepository {
       .update(collectionTable)
       .set({ schema: properties as DbCollectionField[], updatedAt: new Date() })
       .where(eq(collectionTable.id, databaseId))
+    await this.notifyDatabase(databaseId)
   }
 
   private async stripValueFromRows(
@@ -1631,6 +1690,7 @@ export class WorkspaceRepository {
       .update(pageTable)
       .set({ updatedAt: new Date(), lastEditedByUserId: this.ctx.userId })
       .where(eq(pageTable.id, pageId))
+    await this.notifyPage(pageId)
   }
 
   private async assertPageInOrg(pageId: string) {
@@ -1825,6 +1885,7 @@ function toWorkspaceBlock(
 export function createWorkspaceRepository(
   db: AppDatabase,
   ctx: WorkspaceContext,
+  notifier?: WorkspaceNotifier,
 ): WorkspaceRepository {
-  return new WorkspaceRepository(db, ctx)
+  return new WorkspaceRepository(db, ctx, notifier)
 }

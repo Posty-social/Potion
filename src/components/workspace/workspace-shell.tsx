@@ -57,6 +57,7 @@ import type {
 
 import { DatabaseElement } from './database-element'
 import { PageProperties } from './page-properties'
+import { usePageRealtime, type PageDocViewer } from './use-page-realtime'
 import {
   useWorkspaceMutations,
   type WorkspaceMutations,
@@ -71,6 +72,8 @@ type WorkspaceShellProps = {
 export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
   const mutations = useWorkspaceMutations()
   const navigate = useNavigate()
+  // Live updates + who else is viewing: connected to the page's Durable Object.
+  const viewers = usePageRealtime(page.id)
 
   const createTopLevelPage = async () => {
     const summary = await mutations.createPage({ title: 'Untitled' })
@@ -103,6 +106,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
       <main className="min-w-0 border-l border-[var(--workspace-line)] bg-[var(--workspace-paper)]">
         <PageHeader
           page={page}
+          viewers={viewers}
           onNewSubPage={() => createSubPage(page.id)}
           onDelete={async () => {
             await mutations.deletePage({ pageId: page.id })
@@ -402,10 +406,12 @@ function PageTreeNode({
 
 function PageHeader({
   page,
+  viewers,
   onNewSubPage,
   onDelete,
 }: {
   page: WorkspacePage
+  viewers: PageDocViewer[]
   onNewSubPage: () => void
   onDelete: () => void
 }) {
@@ -433,25 +439,63 @@ function PageHeader({
         </span>
       </nav>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Page actions">
-            <MoreHorizontalIcon />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onNewSubPage}>
-            <PlusIcon className="size-4" />
-            Add sub-page
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onDelete}>
-            <Trash2Icon className="size-4" />
-            Delete page
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-2">
+        <PresenceAvatars viewers={viewers} />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Page actions">
+              <MoreHorizontalIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onNewSubPage}>
+              <PlusIcon className="size-4" />
+              Add sub-page
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onDelete}>
+              <Trash2Icon className="size-4" />
+              Delete page
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
+  )
+}
+
+/** Who else is viewing this page right now (other users and your other tabs). */
+function PresenceAvatars({ viewers }: { viewers: PageDocViewer[] }) {
+  if (viewers.length === 0) {
+    return null
+  }
+
+  const shown = viewers.slice(0, 4)
+  const overflow = viewers.length - shown.length
+
+  return (
+    <div
+      className="flex items-center -space-x-1.5"
+      aria-label={`Also viewing: ${viewers.map((viewer) => viewer.name).join(', ')}`}
+    >
+      {shown.map((viewer) => (
+        <Avatar
+          key={viewer.clientId}
+          title={viewer.name}
+          className="size-6 rounded-full ring-2 ring-[var(--workspace-paper)]"
+        >
+          <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[10px] text-white">
+            {initialsFor(viewer.name, viewer.name)}
+          </AvatarFallback>
+        </Avatar>
+      ))}
+      {overflow > 0 ? (
+        <span className="z-10 flex size-6 items-center justify-center rounded-full bg-[var(--workspace-hover)] text-[10px] font-semibold text-[var(--workspace-ink-soft)] ring-2 ring-[var(--workspace-paper)]">
+          +{overflow}
+        </span>
+      ) : null}
+    </div>
   )
 }
 

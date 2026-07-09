@@ -30,12 +30,20 @@ export const Route = createFileRoute('/api/realtime/pages/$pageId')({
           return Response.json({ error: 'unauthenticated' }, { status: 401 })
         }
 
+        // Browsers cannot set custom headers on WebSocket upgrades, so the
+        // client identifies its tab via the `client` query param instead.
+        const clientId = new URL(request.url).searchParams.get('client')
+
         const headers = new Headers(request.headers)
         headers.set('x-potion-page-id', pageId)
         headers.set('x-potion-user-id', access.user?.id ?? 'local-dev')
         headers.set(
+          'x-potion-user-name',
+          access.user?.name || access.user?.email || 'Someone',
+        )
+        headers.set(
           'x-potion-client-id',
-          headers.get('x-potion-client-id') ?? crypto.randomUUID(),
+          clientId ?? headers.get('x-potion-client-id') ?? crypto.randomUUID(),
         )
 
         const id = getRuntimeEnv().PAGE_DOC.idFromName(pageId)

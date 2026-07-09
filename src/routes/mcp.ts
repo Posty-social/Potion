@@ -6,6 +6,7 @@ import {
   resolveMcpHttpRequest,
   type McpWorkspaceGateway,
 } from '#/lib/mcp/tools'
+import { createPageDocNotifier } from '#/lib/realtime/notify.server'
 import {
   listUserWorkspaces,
   resolveMcpContext,
@@ -29,7 +30,7 @@ export const Route = createFileRoute('/mcp')({
         const body = await request.json().catch(() => null)
         const context = await resolveMcpContext(request.headers)
         const repository = context
-          ? createWorkspaceRepository(db, context)
+          ? createWorkspaceRepository(db, context, createPageDocNotifier())
           : null
 
         // Multi-workspace gateway: lets MCP clients list workspaces and target
@@ -51,10 +52,14 @@ export const Route = createFileRoute('/mcp')({
                     'You are not a member of that workspace.',
                   )
                 }
-                return createWorkspaceRepository(db, {
-                  organizationId: workspaceId,
-                  userId: context.userId,
-                })
+                return createWorkspaceRepository(
+                  db,
+                  {
+                    organizationId: workspaceId,
+                    userId: context.userId,
+                  },
+                  createPageDocNotifier(),
+                )
               },
             }
           : null

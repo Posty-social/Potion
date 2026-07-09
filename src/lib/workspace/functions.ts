@@ -3,6 +3,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 
 import { db } from '#/lib/db/connection'
+import { createPageDocNotifier } from '#/lib/realtime/notify.server'
 
 import { requireWorkspaceAccess } from './access'
 import { resolveWorkspaceAccess } from './access.server'
@@ -55,7 +56,11 @@ async function requireRepository(): Promise<WorkspaceRepository> {
   const access = await resolveWorkspaceAccess(getRequestHeaders())
   const { organizationId, user } = requireWorkspaceAccess(access)
 
-  return createWorkspaceRepository(db, { organizationId, userId: user.id })
+  return createWorkspaceRepository(
+    db,
+    { organizationId, userId: user.id },
+    createPageDocNotifier(),
+  )
 }
 
 // --- Queries -------------------------------------------------------------
