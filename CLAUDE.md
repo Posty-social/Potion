@@ -31,6 +31,10 @@ Every read — server functions AND `authClient.*` calls — goes through TanSta
 
 Use `useMutation` (or the shared `useWorkspaceMutations` hook). Drive button state from `mutation.isPending` and inline errors from `mutation.error` — not `useState` flags. After a write, `queryClient.invalidateQueries({ queryKey: […] })` the affected key instead of manually refetching. Workspace mutations invalidate `['workspace']`.
 
+## Database reads (Drizzle) — prefer the relational query API
+
+For reads, use `db.query.<table>.findFirst/findMany({ where, columns, orderBy, limit })` instead of `db.select().from(...)`. It's less boilerplate, returns typed full rows, and `columns` trims what you fetch. Fall back to `select()` only for what the query API can't express: joins (we don't define drizzle `relations()`), aggregations, and subqueries. Writes (`insert`/`update`/`delete`) are unaffected.
+
 ## Routing — use the router, don't reinvent it
 
 - **Auth/redirect gating goes in `beforeLoad`**, resolving cached data via `context.queryClient.ensureQueryData(workspaceAccessQuery())` and `throw redirect(...)`. Don't gate inside components with effects.
