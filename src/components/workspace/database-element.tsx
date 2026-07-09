@@ -1302,9 +1302,10 @@ function OptionPicker({
 }
 
 /**
- * `person` editor: tags a workspace member. Stores the member's user id;
- * legacy free-text values (from when person was a plain text field) still
- * render as-is until replaced.
+ * `person` editor: tags one or more workspace members (Notion-style — the
+ * Person property holds multiple people). Stores an array of member user ids;
+ * legacy values (a single id, or free text from when person was a plain text
+ * field) still render until replaced.
  */
 function PersonPicker({
   property,
@@ -1316,11 +1317,28 @@ function PersonPicker({
   onSave: (next: CellValue) => void
 }) {
   const { data: members } = useQuery(workspaceMembersQuery())
-  const selected = members?.find((member) => member.userId === value)
-  const display =
-    selected?.name ||
-    selected?.email ||
-    (typeof value === 'string' && value ? value : null)
+  // Normalize: array of ids, or a legacy single string wrapped in an array.
+  const selectedIds = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value
+      ? [value]
+      : []
+
+  const displayFor = (id: string) => {
+    const member = members?.find((candidate) => candidate.userId === id)
+    return {
+      label: member?.name || member?.email || id,
+      initials: initialsFor(member?.name ?? id, member?.email ?? id),
+    }
+  }
+
+  const toggle = (userId: string) => {
+    onSave(
+      selectedIds.includes(userId)
+        ? selectedIds.filter((id) => id !== userId)
+        : [...selectedIds, userId],
+    )
+  }
 
   return (
     <DropdownMenu>
@@ -1328,42 +1346,55 @@ function PersonPicker({
         <button
           type="button"
           aria-label={property.name}
-          className="flex min-h-9 w-full cursor-pointer items-center gap-1.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-[var(--workspace-muted)]"
+          className="flex min-h-9 w-full cursor-pointer flex-wrap items-center gap-1 px-3 py-1.5 text-left text-sm transition-colors hover:bg-[var(--workspace-muted)]"
         >
-          {display ? (
-            <>
-              <Avatar className="size-5 rounded-full">
-                <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
-                  {initialsFor(
-                    selected?.name ?? display,
-                    selected?.email ?? display,
-                  )}
-                </AvatarFallback>
-              </Avatar>
-              <span className="truncate">{display}</span>
-            </>
-          ) : (
+          {selectedIds.length === 0 ? (
             <span className="text-[var(--workspace-ink-soft)]">Empty</span>
+          ) : (
+            selectedIds.map((id) => {
+              const person = displayFor(id)
+              return (
+                <span
+                  key={id}
+                  className="inline-flex items-center gap-1 rounded-full bg-[var(--workspace-hover)] py-0.5 pr-2 pl-0.5 text-xs font-medium"
+                >
+                  <Avatar className="size-4.5 rounded-full">
+                    <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[8px] text-white">
+                      {person.initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  {person.label}
+                </span>
+              )
+            })
           )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
-        {(members ?? []).map((member) => (
-          <DropdownMenuItem
-            key={member.userId}
-            onClick={() => onSave(member.userId)}
-          >
-            <Avatar className="size-5 rounded-full">
-              <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
-                {initialsFor(member.name, member.email)}
-              </AvatarFallback>
-            </Avatar>
-            <span className={cn(member.userId === value && 'font-bold')}>
-              {member.name || member.email}
-            </span>
-          </DropdownMenuItem>
-        ))}
-        {value ? (
+        {(members ?? []).map((member) => {
+          const isSelected = selectedIds.includes(member.userId)
+          return (
+            <DropdownMenuItem
+              key={member.userId}
+              onSelect={(event) => {
+                // Keep the menu open so several people can be tagged at once.
+                event.preventDefault()
+                toggle(member.userId)
+              }}
+            >
+              <Avatar className="size-5 rounded-full">
+                <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
+                  {initialsFor(member.name, member.email)}
+                </AvatarFallback>
+              </Avatar>
+              <span className={cn('flex-1', isSelected && 'font-bold')}>
+                {member.name || member.email}
+              </span>
+              {isSelected ? <CheckIcon className="size-3.5" /> : null}
+            </DropdownMenuItem>
+          )
+        })}
+        {selectedIds.length > 0 ? (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onSave(null)}>
