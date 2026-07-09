@@ -14,12 +14,15 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsPropertiesRouteImport } from './routes/settings.properties'
 import { Route as SettingsMembersRouteImport } from './routes/settings.members'
+import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as PPageSlugRouteImport } from './routes/p/$pageSlug'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known.oauth-protected-resource'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiUsersUserIdAvatarRouteImport } from './routes/api/users/$userId/avatar'
 import { Route as ApiRealtimePagesPageIdRouteImport } from './routes/api/realtime/pages/$pageId'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -47,9 +50,19 @@ const SettingsIndexRoute = SettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsPropertiesRoute = SettingsPropertiesRouteImport.update({
+  id: '/properties',
+  path: '/properties',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsMembersRoute = SettingsMembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAccountRoute = SettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
   getParentRoute: () => SettingsRoute,
 } as any)
 const PPageSlugRoute = PPageSlugRouteImport.update({
@@ -80,6 +93,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiUsersUserIdAvatarRoute = ApiUsersUserIdAvatarRouteImport.update({
+  id: '/api/users/$userId/avatar',
+  path: '/api/users/$userId/avatar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRealtimePagesPageIdRoute = ApiRealtimePagesPageIdRouteImport.update({
   id: '/api/realtime/pages/$pageId',
   path: '/api/realtime/pages/$pageId',
@@ -95,10 +113,13 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/account': typeof SettingsAccountRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/settings/properties': typeof SettingsPropertiesRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
+  '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -108,10 +129,13 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/account': typeof SettingsAccountRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/settings/properties': typeof SettingsPropertiesRoute
   '/settings': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
+  '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -123,10 +147,13 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/p/$pageSlug': typeof PPageSlugRoute
+  '/settings/account': typeof SettingsAccountRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/settings/properties': typeof SettingsPropertiesRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
+  '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -139,10 +166,13 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/accept-invitation/$invitationId'
     | '/p/$pageSlug'
+    | '/settings/account'
     | '/settings/members'
+    | '/settings/properties'
     | '/settings/'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
+    | '/api/users/$userId/avatar'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -152,10 +182,13 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/accept-invitation/$invitationId'
     | '/p/$pageSlug'
+    | '/settings/account'
     | '/settings/members'
+    | '/settings/properties'
     | '/settings'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
+    | '/api/users/$userId/avatar'
   id:
     | '__root__'
     | '/'
@@ -166,10 +199,13 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/accept-invitation/$invitationId'
     | '/p/$pageSlug'
+    | '/settings/account'
     | '/settings/members'
+    | '/settings/properties'
     | '/settings/'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
+    | '/api/users/$userId/avatar'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -183,6 +219,7 @@ export interface RootRouteChildren {
   PPageSlugRoute: typeof PPageSlugRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiRealtimePagesPageIdRoute: typeof ApiRealtimePagesPageIdRoute
+  ApiUsersUserIdAvatarRoute: typeof ApiUsersUserIdAvatarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -222,11 +259,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/properties': {
+      id: '/settings/properties'
+      path: '/properties'
+      fullPath: '/settings/properties'
+      preLoaderRoute: typeof SettingsPropertiesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/members': {
       id: '/settings/members'
       path: '/members'
       fullPath: '/settings/members'
       preLoaderRoute: typeof SettingsMembersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/account': {
+      id: '/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof SettingsAccountRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/p/$pageSlug': {
@@ -264,6 +315,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/users/$userId/avatar': {
+      id: '/api/users/$userId/avatar'
+      path: '/api/users/$userId/avatar'
+      fullPath: '/api/users/$userId/avatar'
+      preLoaderRoute: typeof ApiUsersUserIdAvatarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/realtime/pages/$pageId': {
       id: '/api/realtime/pages/$pageId'
       path: '/api/realtime/pages/$pageId'
@@ -275,12 +333,16 @@ declare module '@tanstack/react-router' {
 }
 
 interface SettingsRouteChildren {
+  SettingsAccountRoute: typeof SettingsAccountRoute
   SettingsMembersRoute: typeof SettingsMembersRoute
+  SettingsPropertiesRoute: typeof SettingsPropertiesRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAccountRoute: SettingsAccountRoute,
   SettingsMembersRoute: SettingsMembersRoute,
+  SettingsPropertiesRoute: SettingsPropertiesRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }
 
@@ -301,6 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   PPageSlugRoute: PPageSlugRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiRealtimePagesPageIdRoute: ApiRealtimePagesPageIdRoute,
+  ApiUsersUserIdAvatarRoute: ApiUsersUserIdAvatarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

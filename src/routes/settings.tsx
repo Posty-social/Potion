@@ -37,7 +37,25 @@ function SettingsLayout() {
         </Link>
 
         <p className="px-2 pb-1 text-xs font-bold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
-          Settings
+          Account
+        </p>
+        <nav className="mb-4 flex flex-col gap-0.5">
+          <Link
+            to="/settings/account"
+            className={NAV_LINK_CLASS}
+            activeProps={{
+              className: cn(
+                NAV_LINK_CLASS,
+                'bg-[var(--workspace-hover)] font-semibold text-[var(--workspace-ink)]',
+              ),
+            }}
+          >
+            My account
+          </Link>
+        </nav>
+
+        <p className="px-2 pb-1 text-xs font-bold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
+          Workspace
         </p>
         <nav className="flex flex-col gap-0.5">
           <Link
@@ -64,6 +82,18 @@ function SettingsLayout() {
             }}
           >
             Members
+          </Link>
+          <Link
+            to="/settings/properties"
+            className={NAV_LINK_CLASS}
+            activeProps={{
+              className: cn(
+                NAV_LINK_CLASS,
+                'bg-[var(--workspace-hover)] font-semibold text-[var(--workspace-ink)]',
+              ),
+            }}
+          >
+            Properties
           </Link>
         </nav>
       </aside>
