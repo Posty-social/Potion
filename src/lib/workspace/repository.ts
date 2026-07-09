@@ -6,7 +6,9 @@ import {
   collection as collectionTable,
   collectionRow as collectionRowTable,
   collectionView as collectionViewTable,
+  member as memberTable,
   page as pageTable,
+  user as userTable,
   workspaceProperty as workspacePropertyTable,
   type CollectionField as DbCollectionField,
   type CollectionViewConfig,
@@ -100,6 +102,13 @@ function pickColor(index: number): string {
   return FIELD_OPTION_COLORS[index % FIELD_OPTION_COLORS.length]
 }
 
+/** A page's `properties` column → attached ids (handles legacy object rows). */
+function normalizeAttachedIds(raw: unknown): string[] {
+  return ((raw ?? []) as unknown[]).map((entry) =>
+    typeof entry === 'string' ? entry : (entry as DatabaseProperty).id,
+  )
+}
+
 /** Map a shared catalog row to the UI property shape. */
 function catalogRowToProperty(
   row: typeof workspacePropertyTable.$inferSelect,
@@ -189,11 +198,10 @@ export class WorkspaceRepository {
       return
     }
 
-    const [row] = await this.db
-      .select({ pageId: collectionTable.pageId })
-      .from(collectionTable)
-      .where(eq(collectionTable.id, databaseId))
-      .limit(1)
+    const row = await this.db.query.collection.findFirst({
+      columns: { pageId: true },
+      where: eq(collectionTable.id, databaseId),
+    })
 
     await this.notifyPage(row?.pageId)
   }
@@ -516,13 +524,30 @@ export class WorkspaceRepository {
   // Editing a definition (rename/retype/options) is therefore shared across
   // every page that attaches it; deleting a property only *detaches* it here.
 
+  /** Workspace members, for `person` properties (tag a user by id). */
+  async listMembers(): Promise<
+    Array<{ userId: string; name: string; email: string }>
+  > {
+    const rows = await this.db
+      .select({
+        userId: memberTable.userId,
+        name: userTable.name,
+        email: userTable.email,
+      })
+      .from(memberTable)
+      .innerJoin(userTable, eq(memberTable.userId, userTable.id))
+      .where(eq(memberTable.organizationId, this.ctx.organizationId))
+      .orderBy(asc(userTable.name))
+
+    return rows
+  }
+
   /** Every shared property definition in the workspace, for the picker. */
   async listWorkspaceProperties(): Promise<DatabaseProperty[]> {
-    const rows = await this.db
-      .select()
-      .from(workspacePropertyTable)
-      .where(eq(workspacePropertyTable.organizationId, this.ctx.organizationId))
-      .orderBy(asc(workspacePropertyTable.name))
+    const rows = await this.db.query.workspaceProperty.findMany({
+      where: eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+      orderBy: asc(workspacePropertyTable.name),
+    })
 
     return rows.map(catalogRowToProperty)
   }
@@ -574,6 +599,18 @@ export class WorkspaceRepository {
     type?: Exclude<PropertyType, 'title'>
   }): Promise<{ ok: true }> {
     await this.assertPageInOrg(input.pageId)
+    await this.updateCatalogProperty(input)
+    await this.notifyPage(input.pageId)
+
+    return { ok: true }
+  }
+
+  /** Rename/retype a shared property — changes it on every page using it. */
+  async updateCatalogProperty(input: {
+    propertyId: string
+    name?: string
+    type?: Exclude<PropertyType, 'title'>
+  }): Promise<{ ok: true }> {
     const row = await this.getCatalogProperty(input.propertyId)
 
     const patch: Partial<typeof workspacePropertyTable.$inferInsert> = {
@@ -598,7 +635,57 @@ export class WorkspaceRepository {
           eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
         ),
       )
-    await this.notifyPage(input.pageId)
+
+    return { ok: true }
+  }
+
+  /**
+   * Delete a shared property everywhere: remove it from the catalog, detach it
+   * from every page that uses it, and drop those pages' stored values.
+   */
+  async deleteCatalogProperty(input: {
+    propertyId: string
+  }): Promise<{ ok: true }> {
+    await this.getCatalogProperty(input.propertyId)
+
+    await this.db
+      .delete(workspacePropertyTable)
+      .where(
+        and(
+          eq(workspacePropertyTable.id, input.propertyId),
+          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+        ),
+      )
+
+    const pages = await this.db.query.page.findMany({
+      where: eq(pageTable.organizationId, this.ctx.organizationId),
+    })
+
+    const affected = pages.filter((page) =>
+      normalizeAttachedIds(page.properties).includes(input.propertyId),
+    )
+
+    await Promise.all(
+      affected.map((page) => {
+        const values = {
+          ...((page.propertyValues ?? {}) as Record<string, CellValue>),
+        }
+        delete values[input.propertyId]
+
+        return this.db
+          .update(pageTable)
+          .set({
+            properties: normalizeAttachedIds(page.properties).filter(
+              (id) => id !== input.propertyId,
+            ),
+            propertyValues: values as JsonRecord,
+            updatedAt: new Date(),
+            lastEditedByUserId: this.ctx.userId,
+          })
+          .where(eq(pageTable.id, page.id))
+      }),
+    )
+    await Promise.all(affected.map((page) => this.notifyPage(page.id)))
 
     return { ok: true }
   }
@@ -658,6 +745,18 @@ export class WorkspaceRepository {
     pageId: string
     propertyId: string
     name: string
+    optionId?: string
+  }): Promise<{ optionId: string }> {
+    const result = await this.addCatalogPropertyOption(input)
+    await this.notifyPage(input.pageId)
+
+    return result
+  }
+
+  /** Add a select option to a shared property (shared everywhere it's used). */
+  async addCatalogPropertyOption(input: {
+    propertyId: string
+    name: string
     // Optional client-generated id so optimistic UI can know the id upfront.
     optionId?: string
   }): Promise<{ optionId: string }> {
@@ -678,13 +777,24 @@ export class WorkspaceRepository {
     }
 
     await this.writeCatalogOptions(input.propertyId, [...options, option])
-    await this.notifyPage(input.pageId)
 
     return { optionId: option.id }
   }
 
   async renamePagePropertyOption(input: {
     pageId: string
+    propertyId: string
+    optionId: string
+    name: string
+  }): Promise<{ ok: true }> {
+    await this.renameCatalogPropertyOption(input)
+    await this.notifyPage(input.pageId)
+
+    return { ok: true }
+  }
+
+  /** Rename a shared select option (shared everywhere it's used). */
+  async renameCatalogPropertyOption(input: {
     propertyId: string
     optionId: string
     name: string
@@ -704,7 +814,20 @@ export class WorkspaceRepository {
     }
 
     await this.writeCatalogOptions(input.propertyId, options)
-    await this.notifyPage(input.pageId)
+
+    return { ok: true }
+  }
+
+  /** Delete a shared select option (removed everywhere it's used). */
+  async deleteCatalogPropertyOption(input: {
+    propertyId: string
+    optionId: string
+  }): Promise<{ ok: true }> {
+    const row = await this.getCatalogProperty(input.propertyId)
+    await this.writeCatalogOptions(
+      input.propertyId,
+      (row.options ?? []).filter((option) => option.id !== input.optionId),
+    )
 
     return { ok: true }
   }
@@ -714,11 +837,7 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
   }): Promise<{ ok: true }> {
-    const row = await this.getCatalogProperty(input.propertyId)
-    await this.writeCatalogOptions(
-      input.propertyId,
-      (row.options ?? []).filter((option) => option.id !== input.optionId),
-    )
+    await this.deleteCatalogPropertyOption(input)
 
     // Clear the removed option from this page's value.
     const page = await this.assertPageInOrg(input.pageId)
@@ -749,16 +868,12 @@ export class WorkspaceRepository {
   private async getCatalogProperty(
     propertyId: string,
   ): Promise<typeof workspacePropertyTable.$inferSelect> {
-    const [row] = await this.db
-      .select()
-      .from(workspacePropertyTable)
-      .where(
-        and(
-          eq(workspacePropertyTable.id, propertyId),
-          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
-        ),
-      )
-      .limit(1)
+    const row = await this.db.query.workspaceProperty.findFirst({
+      where: and(
+        eq(workspacePropertyTable.id, propertyId),
+        eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+      ),
+    })
 
     if (!row) {
       throw new WorkspaceRepositoryError(
@@ -823,15 +938,12 @@ export class WorkspaceRepository {
       return []
     }
 
-    const rows = await this.db
-      .select()
-      .from(workspacePropertyTable)
-      .where(
-        and(
-          eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
-          inArray(workspacePropertyTable.id, ids),
-        ),
-      )
+    const rows = await this.db.query.workspaceProperty.findMany({
+      where: and(
+        eq(workspacePropertyTable.organizationId, this.ctx.organizationId),
+        inArray(workspacePropertyTable.id, ids),
+      ),
+    })
     const byId = new Map(rows.map((row) => [row.id, catalogRowToProperty(row)]))
 
     return ids

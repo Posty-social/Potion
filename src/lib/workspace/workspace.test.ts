@@ -11,6 +11,8 @@ import { generateKeyBetween, keyAtEnd } from './ordering'
 import {
   attachPagePropertySchema,
   cellValuesSchema,
+  deleteCatalogPropertySchema,
+  updateCatalogPropertySchema,
   createPageSchema,
   getPageSchema,
   importTextSchema,
@@ -67,6 +69,22 @@ describe('workspace input validation', () => {
     expect(
       attachPagePropertySchema.safeParse({ pageId: 'page_1' }).success,
     ).toBe(false)
+  })
+
+  it('validates workspace catalog property edits', () => {
+    expect(
+      updateCatalogPropertySchema.safeParse({
+        propertyId: 'prop_1',
+        name: 'Status',
+      }).success,
+    ).toBe(true)
+    expect(
+      updateCatalogPropertySchema.safeParse({ name: 'Status' }).success,
+    ).toBe(false)
+    expect(
+      deleteCatalogPropertySchema.safeParse({ propertyId: 'prop_1' }).success,
+    ).toBe(true)
+    expect(deleteCatalogPropertySchema.safeParse({}).success).toBe(false)
   })
 
   it('requires a title when creating a page', () => {

@@ -234,6 +234,29 @@ export const deletePagePropertyOptionSchema = z.object({
   optionId: id,
 })
 
+// --- Workspace property catalog (shared definitions, no page context) ------
+
+export const updateCatalogPropertySchema = z.object({
+  propertyId: id,
+  name: z.string().min(1).max(80).optional(),
+  type: propertyTypeSchema.optional(),
+})
+export const deleteCatalogPropertySchema = z.object({ propertyId: id })
+export const addCatalogPropertyOptionSchema = z.object({
+  propertyId: id,
+  name: z.string().min(1).max(80),
+  optionId: id.optional(),
+})
+export const renameCatalogPropertyOptionSchema = z.object({
+  propertyId: id,
+  optionId: id,
+  name: z.string().min(1).max(80),
+})
+export const deleteCatalogPropertyOptionSchema = z.object({
+  propertyId: id,
+  optionId: id,
+})
+
 // --- Import --------------------------------------------------------------
 
 export const importTextSchema = z.object({

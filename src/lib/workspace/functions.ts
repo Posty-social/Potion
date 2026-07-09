@@ -12,11 +12,16 @@ import {
   type WorkspaceRepository,
 } from './repository'
 import {
+  addCatalogPropertyOptionSchema,
   addPagePropertyOptionSchema,
   addPagePropertySchema,
   attachPagePropertySchema,
   addPropertyOptionSchema,
   addPropertySchema,
+  deleteCatalogPropertyOptionSchema,
+  deleteCatalogPropertySchema,
+  renameCatalogPropertyOptionSchema,
+  updateCatalogPropertySchema,
   addRowSchema,
   addViewSchema,
   createBlockSchema,
@@ -72,6 +77,10 @@ export const listWorkspacePages = createServerFn({ method: 'GET' }).handler(
 export const listWorkspaceProperties = createServerFn({
   method: 'GET',
 }).handler(async () => (await requireRepository()).listWorkspaceProperties())
+
+export const listWorkspaceMembers = createServerFn({ method: 'GET' }).handler(
+  async () => (await requireRepository()).listMembers(),
+)
 
 export const getWorkspacePage = createServerFn({ method: 'GET' })
   .validator(getPageSchema)
@@ -163,6 +172,44 @@ export const deleteWorkspacePagePropertyOption = createServerFn({
   .validator(deletePagePropertyOptionSchema)
   .handler(async ({ data }) =>
     (await requireRepository()).deletePagePropertyOption(data),
+  )
+
+// --- Workspace property catalog (shared definitions, managed in settings) --
+
+export const updateWorkspaceCatalogProperty = createServerFn({ method: 'POST' })
+  .validator(updateCatalogPropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).updateCatalogProperty(data),
+  )
+
+export const deleteWorkspaceCatalogProperty = createServerFn({ method: 'POST' })
+  .validator(deleteCatalogPropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).deleteCatalogProperty(data),
+  )
+
+export const addWorkspaceCatalogPropertyOption = createServerFn({
+  method: 'POST',
+})
+  .validator(addCatalogPropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).addCatalogPropertyOption(data),
+  )
+
+export const renameWorkspaceCatalogPropertyOption = createServerFn({
+  method: 'POST',
+})
+  .validator(renameCatalogPropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).renameCatalogPropertyOption(data),
+  )
+
+export const deleteWorkspaceCatalogPropertyOption = createServerFn({
+  method: 'POST',
+})
+  .validator(deleteCatalogPropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).deleteCatalogPropertyOption(data),
   )
 
 // --- Block mutations -----------------------------------------------------
@@ -305,4 +352,11 @@ export const workspacePropertiesQuery = () =>
   queryOptions({
     queryKey: ['workspace', 'properties'],
     queryFn: () => listWorkspaceProperties(),
+  })
+
+/** Workspace members, for `person` property pickers. */
+export const workspaceMembersQuery = () =>
+  queryOptions({
+    queryKey: ['workspace', 'members'],
+    queryFn: () => listWorkspaceMembers(),
   })
