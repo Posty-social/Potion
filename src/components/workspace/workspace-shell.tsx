@@ -497,6 +497,10 @@ function PresenceAvatars({ viewers }: { viewers: PageDocViewer[] }) {
           title={viewer.name}
           className="size-6 rounded-full ring-2 ring-[var(--workspace-paper)]"
         >
+          <AvatarImage
+            src={`/api/users/${viewer.userId}/avatar`}
+            alt={viewer.name}
+          />
           <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[10px] text-white">
             {initialsFor(viewer.name, viewer.name)}
           </AvatarFallback>

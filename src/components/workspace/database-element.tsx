@@ -46,7 +46,7 @@ import {
   type ReactNode,
 } from 'react'
 
-import { Avatar, AvatarFallback } from '#/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '#/components/ui/avatar'
 import { Button } from '#/components/ui/button'
 import { Checkbox } from '#/components/ui/checkbox'
 import {
@@ -1359,6 +1359,10 @@ function PersonPicker({
                   className="inline-flex items-center gap-1 rounded-full bg-[var(--workspace-hover)] py-0.5 pr-2 pl-0.5 text-xs font-medium"
                 >
                   <Avatar className="size-4.5 rounded-full">
+                    <AvatarImage
+                      src={`/api/users/${id}/avatar`}
+                      alt={person.label}
+                    />
                     <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[8px] text-white">
                       {person.initials}
                     </AvatarFallback>
@@ -1383,6 +1387,10 @@ function PersonPicker({
               }}
             >
               <Avatar className="size-5 rounded-full">
+                <AvatarImage
+                  src={`/api/users/${member.userId}/avatar`}
+                  alt={member.name || member.email}
+                />
                 <AvatarFallback className="rounded-full bg-[var(--accent-teal)] text-[9px] text-white">
                   {initialsFor(member.name, member.email)}
                 </AvatarFallback>

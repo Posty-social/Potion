@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import { Avatar, AvatarFallback } from '#/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '#/components/ui/avatar'
 import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -218,6 +218,10 @@ export function MembersSettings({
               className="flex items-center gap-3 border-b border-[var(--workspace-line)] py-2 last:border-b-0"
             >
               <Avatar className="size-8 rounded-md">
+                <AvatarImage
+                  src={`/api/users/${member.userId}/avatar`}
+                  alt={member.user.name ?? member.user.email}
+                />
                 <AvatarFallback className="rounded-md bg-[var(--accent-teal)] text-xs text-white">
                   {initialsFor(member.user.name ?? '', member.user.email)}
                 </AvatarFallback>
