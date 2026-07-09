@@ -11,6 +11,7 @@ import {
   ListChecksIcon,
   ListIcon,
   LogOutIcon,
+  UserRoundIcon,
   MinusIcon,
   MoreHorizontalIcon,
   PlusIcon,
@@ -30,7 +31,7 @@ import {
   type ReactNode,
 } from 'react'
 
-import { Avatar, AvatarFallback } from '#/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '#/components/ui/avatar'
 import { Button } from '#/components/ui/button'
 import { Checkbox } from '#/components/ui/checkbox'
 import {
@@ -242,6 +243,10 @@ function Sidebar({
               {user ? (
                 <>
                   <Avatar className="size-7 rounded-md">
+                    <AvatarImage
+                      src={`/api/users/${user.id}/avatar`}
+                      alt={user.name ?? 'Profile picture'}
+                    />
                     <AvatarFallback className="rounded-md bg-[var(--accent-teal)] text-xs text-white">
                       {initialsFor(user.name ?? '', user.email)}
                     </AvatarFallback>
@@ -267,6 +272,13 @@ function Sidebar({
             <DropdownMenuLabel className="truncate font-normal text-[var(--workspace-ink-soft)]">
               {user?.email}
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link to="/settings/account" className="no-underline">
+                <UserRoundIcon className="size-4" />
+                Account settings
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={async () => {
