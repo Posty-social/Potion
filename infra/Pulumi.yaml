@@ -3,5 +3,10 @@ runtime:
   name: nodejs
   options:
     packagemanager: bun
+    # The repo uses TypeScript 7 (the native compiler), which Pulumi's vendored
+    # ts-node@7 cannot load (no CJS `ts.sys`). Disable Pulumi's own transpile
+    # hook and let tsx (esbuild-based, TS-version-independent) load index.ts.
+    typescript: false
+    nodeargs: --import=tsx
 main: index.ts
 description: Cloudflare resources for the self-hosted Potion workspace.
