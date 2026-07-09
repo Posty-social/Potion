@@ -1,12 +1,31 @@
 # Potion
 
-A realtime, self-hostable [Notion](https://www.notion.so) clone built on Cloudflare
+A realtime, self-hostable **team collaboration tool** built on Cloudflare
 Workers, D1, R2, and Durable Objects — with [TanStack Start](https://tanstack.com/start),
 [better-auth](https://www.better-auth.com), and Drizzle ORM.
 
 It's designed to be **forked and deployed to your own Cloudflare account**. Every
 deployment-specific value (account, domain, resource names, OAuth creds) comes from
 GitHub Actions variables and secrets, so there's nothing to hardcode.
+
+## Features
+
+- **Pages & blocks** — nested pages with headings, to-dos, quotes, callouts,
+  dividers, and type-anywhere editing. Markdown rendering throughout.
+- **Databases** — typed properties (text, number, select, multi-select, status,
+  date, person, checkbox, URL, and more) with table, board, list, gallery, and
+  calendar views, plus per-view filters, sorts, and grouping.
+- **Shared properties** — page properties live in a workspace-wide catalog, so
+  pages reuse each other's definitions and select options; manage them all from
+  Settings → Properties.
+- **People** — the person property tags one or more workspace members, with
+  profile pictures stored in R2.
+- **Realtime** — every page has a Durable Object fanning out edits over
+  WebSockets: open tabs stay in sync and the header shows who else is viewing.
+- **Workspaces** — multiple workspaces per user with invitations, member
+  management, and role-based access, backed by better-auth organizations.
+- **MCP server** — agents connect at `/mcp` (OAuth) and get tools to search,
+  read, and write pages, databases, and properties.
 
 ## Deploy your own
 
@@ -58,9 +77,9 @@ custom domain — is created by **Pulumi** on your first deploy.
 Push to `main` (or `gh workflow run deploy.yml`). The GitHub Actions pipeline runs
 the D1 migrations and `pulumi up`, deploying to `https://<your-domain>`.
 
-> The deploy pipeline lives in `.github/workflows/deploy.yml` + the Pulumi program.
-> `scripts/setup.sh` only prepares your secrets — deployment runs once that pipeline
-> is in the repo.
+> The deploy pipeline lives in `.github/workflows/deploy.yml` + the Pulumi program
+> (`infra/index.ts`). `scripts/setup.sh` only prepares your secrets — deployment
+> runs once that pipeline is in the repo.
 
 ### Configuration reference
 
@@ -69,16 +88,17 @@ The script sets these for you; you can also manage them by hand in
 
 **Variables** (non-sensitive)
 
-| Name                                    | Required?                       | Notes                                |
-| --------------------------------------- | ------------------------------- | ------------------------------------ |
-| `CLOUDFLARE_ACCOUNT_ID`                 | **yes**                         | Target Cloudflare account            |
-| `APP_DOMAIN`                            | **yes**                         | e.g. `potion.posty.social`           |
-| `WORKER_NAME`                           | default `potion`                | Worker/service name                  |
-| `D1_DATABASE_NAME`                      | default `<worker>-db`           | Created by Pulumi                    |
-| `R2_BUCKET_NAME`                        | default `<worker>-assets`       | Created by Pulumi                    |
-| `PULUMI_STATE_BUCKET`                   | default `<worker>-pulumi-state` | Created by the script                |
-| `CLOUDFLARE_ZONE_ID`                    | optional                        | Derived from `APP_DOMAIN` if omitted |
-| `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID` | optional                        | Enables that provider                |
+| Name                                    | Required?                       | Notes                                  |
+| --------------------------------------- | ------------------------------- | -------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`                 | **yes**                         | Target Cloudflare account              |
+| `APP_DOMAIN`                            | **yes**                         | e.g. `potion.posty.social`             |
+| `WORKER_NAME`                           | default `potion`                | Worker/service name                    |
+| `D1_DATABASE_NAME`                      | default `<worker>-db`           | Created by Pulumi                      |
+| `R2_BUCKET_NAME`                        | default `<worker>-assets`       | Created by Pulumi                      |
+| `PULUMI_STATE_BUCKET`                   | default `<worker>-pulumi-state` | Created by the script                  |
+| `CLOUDFLARE_ZONE_ID`                    | optional                        | Derived from `APP_DOMAIN` if omitted   |
+| `ZERO_TRUST_EMAILS`                     | optional                        | Locks the app behind Cloudflare Access |
+| `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID` | optional                        | Enables that provider                  |
 
 **Secrets** (sensitive)
 
@@ -94,21 +114,50 @@ The script sets these for you; you can also manage them by hand in
 
 ```bash
 bun install
-bun run dev        # http://localhost:3000
+echo "BETTER_AUTH_SECRET=$(npx -y @better-auth/cli@latest secret)" >> .dev.vars
+bun run db:migrate   # apply D1 migrations locally
+bun run dev          # http://localhost:3001
 ```
 
-Create a `.env.local` with an auth secret and URL for local runs:
-
-```bash
-echo "BETTER_AUTH_URL=http://localhost:3000" >> .env.local
-echo "BETTER_AUTH_SECRET=$(npx -y @better-auth/cli@latest secret)" >> .env.local
-```
+Local D1/R2/Durable Object bindings come from `wrangler.jsonc` via the Cloudflare
+Vite plugin; after changing them, regenerate types with `bun run cf-typegen`.
 
 Build a production bundle with `bun run build`.
 
+## Architecture
+
+- **`src/routes/`** — file-based [TanStack Router](https://tanstack.com/router)
+  routes. `/p/$pageSlug` is a page, `/settings/*` are the account and workspace
+  settings, `/mcp` is the MCP endpoint, and `src/routes/api/` holds server routes
+  (realtime WebSocket upgrade, avatars).
+- **`src/lib/workspace/`** — the domain layer. `WorkspaceRepository` scopes every
+  query to the active workspace; server functions in `functions.ts` expose it to
+  the client along with TanStack Query `queryOptions` factories.
+- **`src/lib/realtime/`** — the `PageDoc` Durable Object (one per page): fans out
+  `doc:update` events after writes and tracks viewer presence over WebSockets.
+- **`src/lib/mcp/`** — the MCP tool definitions and JSON-RPC handler.
+- **`src/lib/auth.ts`** — better-auth with the Drizzle adapter over D1, the
+  organization plugin (workspaces), and optional Google/GitHub OAuth. Regenerate
+  the auth tables with `npx -y @better-auth/cli@latest generate`.
+- **`infra/index.ts`** — the Pulumi program that provisions Cloudflare resources.
+
+Conventions (data fetching, routing, Drizzle usage) live in [`CLAUDE.md`](./CLAUDE.md).
+
+## MCP
+
+The app exposes an MCP server at `https://<your-domain>/mcp` (streamable HTTP,
+OAuth). Connect it to Claude Code with:
+
+```bash
+claude mcp add --transport http potion https://<your-domain>/mcp
+```
+
+Agents get tools to list workspaces, search and read pages, manage blocks,
+database rows, and shared page properties.
+
 ## Testing
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+Tests run with [Vitest](https://vitest.dev/):
 
 ```bash
 bun run test
@@ -116,192 +165,9 @@ bun run test
 
 ## Styling
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `npm install @tailwindcss/vite tailwindcss -D`
-
-## Cloudflare bindings
-
-Production deploys are handled by Pulumi — see [Deploy your own](#deploy-your-own).
-For local development the D1, R2, and Durable Object bindings live in
-`wrangler.jsonc`; after changing them, regenerate types with `bun run cf-typegen`.
-See the [bindings docs](https://developers.cloudflare.com/workers/wrangler/configuration/).
-
-## Shadcn
-
-Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
+[Tailwind CSS v4](https://tailwindcss.com/) with [shadcn/ui](https://ui.shadcn.com/)
+components. Add new components with:
 
 ```bash
-pnpm dlx shadcn@latest add button
+bunx shadcn@latest add button
 ```
-
-## Authentication
-
-Auth is [better-auth](https://www.better-auth.com), configured in `src/lib/auth.ts`
-with the Drizzle adapter over D1, the organization plugin, and (optionally) Google
-and GitHub OAuth. The auth tables are generated into the Drizzle schema:
-
-```bash
-npx -y @better-auth/cli@latest generate
-```
-
-For local dev, set `BETTER_AUTH_SECRET` in `.env.local` (see [Local development](#local-development)).
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from '@tanstack/react-router'
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
