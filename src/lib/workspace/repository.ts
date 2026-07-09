@@ -282,6 +282,11 @@ export class WorkspaceRepository {
       databases,
       ancestors,
       childPages: summaries.filter((page) => page.parentPageId === pageRow.id),
+      properties: (pageRow.properties ?? []) as DatabaseProperty[],
+      propertyValues: (pageRow.propertyValues ?? {}) as Record<
+        string,
+        CellValue
+      >,
     }
   }
 
@@ -405,6 +410,7 @@ export class WorkspaceRepository {
       icon,
       parentPageId,
       position: keyAtEnd(siblingPositions),
+      createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     }
   }
@@ -444,6 +450,233 @@ export class WorkspaceRepository {
     await this.db.delete(pageTable).where(eq(pageTable.id, page.id))
 
     return { ok: true }
+  }
+
+  // --- Page properties ---------------------------------------------------
+  // Notion-style properties shown at the top of a page. Each page owns its own
+  // schema (`page.properties`) and values (`page.propertyValues`); mechanics
+  // mirror the database property methods but scoped to a single page.
+
+  async addPageProperty(input: {
+    pageId: string
+    name: string
+    type: Exclude<PropertyType, 'title'>
+  }): Promise<{ propertyId: string }> {
+    const { properties } = await this.readPageProperties(input.pageId)
+    const property: DatabaseProperty = {
+      id: newId('prop'),
+      name: input.name.trim() || 'Property',
+      type: input.type,
+    }
+
+    if (OPTION_PROPERTY_TYPES.includes(input.type)) {
+      property.options = []
+    }
+
+    await this.writePageProperties(input.pageId, [...properties, property])
+
+    return { propertyId: property.id }
+  }
+
+  async updatePageProperty(input: {
+    pageId: string
+    propertyId: string
+    name?: string
+    type?: Exclude<PropertyType, 'title'>
+  }): Promise<{ ok: true }> {
+    const { properties } = await this.readPageProperties(input.pageId)
+    const property = properties.find((p) => p.id === input.propertyId)
+
+    if (!property) {
+      throw new WorkspaceRepositoryError(
+        'property_not_found',
+        'Property not found.',
+      )
+    }
+
+    if (input.name !== undefined) {
+      property.name = input.name.trim() || 'Property'
+    }
+
+    if (input.type !== undefined && input.type !== property.type) {
+      property.type = input.type
+      property.options = OPTION_PROPERTY_TYPES.includes(input.type)
+        ? (property.options ?? [])
+        : undefined
+    }
+
+    await this.writePageProperties(input.pageId, properties)
+
+    return { ok: true }
+  }
+
+  async deletePageProperty(input: {
+    pageId: string
+    propertyId: string
+  }): Promise<{ ok: true }> {
+    const { page, properties } = await this.readPageProperties(input.pageId)
+    const values = {
+      ...((page.propertyValues ?? {}) as Record<string, CellValue>),
+    }
+    delete values[input.propertyId]
+
+    await this.db
+      .update(pageTable)
+      .set({
+        properties: properties.filter(
+          (p) => p.id !== input.propertyId,
+        ) as DbCollectionField[],
+        propertyValues: values as JsonRecord,
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(pageTable.id, page.id))
+
+    return { ok: true }
+  }
+
+  async setPagePropertyValue(input: {
+    pageId: string
+    propertyId: string
+    value: CellValue
+  }): Promise<{ ok: true }> {
+    const page = await this.assertPageInOrg(input.pageId)
+    const values = {
+      ...((page.propertyValues ?? {}) as Record<string, CellValue>),
+      [input.propertyId]: input.value,
+    }
+
+    await this.db
+      .update(pageTable)
+      .set({
+        propertyValues: values as JsonRecord,
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(pageTable.id, page.id))
+
+    return { ok: true }
+  }
+
+  async addPagePropertyOption(input: {
+    pageId: string
+    propertyId: string
+    name: string
+  }): Promise<{ optionId: string }> {
+    const { properties } = await this.readPageProperties(input.pageId)
+    const property = properties.find((p) => p.id === input.propertyId)
+
+    if (!property || !OPTION_PROPERTY_TYPES.includes(property.type)) {
+      throw new WorkspaceRepositoryError(
+        'property_not_found',
+        'Option property not found.',
+      )
+    }
+
+    const options = property.options ?? []
+    const option: PropertyOption = {
+      id: newId('opt'),
+      name: input.name.trim() || 'Option',
+      color: pickColor(options.length),
+    }
+    property.options = [...options, option]
+
+    await this.writePageProperties(input.pageId, properties)
+
+    return { optionId: option.id }
+  }
+
+  async renamePagePropertyOption(input: {
+    pageId: string
+    propertyId: string
+    optionId: string
+    name: string
+  }): Promise<{ ok: true }> {
+    const { properties } = await this.readPageProperties(input.pageId)
+    const option = properties
+      .find((p) => p.id === input.propertyId)
+      ?.options?.find((o) => o.id === input.optionId)
+
+    if (!option) {
+      throw new WorkspaceRepositoryError(
+        'property_not_found',
+        'Option not found.',
+      )
+    }
+
+    option.name = input.name.trim() || 'Option'
+    await this.writePageProperties(input.pageId, properties)
+
+    return { ok: true }
+  }
+
+  async deletePagePropertyOption(input: {
+    pageId: string
+    propertyId: string
+    optionId: string
+  }): Promise<{ ok: true }> {
+    const { page, properties } = await this.readPageProperties(input.pageId)
+    const property = properties.find((p) => p.id === input.propertyId)
+
+    if (!property?.options) {
+      throw new WorkspaceRepositoryError(
+        'property_not_found',
+        'Option not found.',
+      )
+    }
+
+    property.options = property.options.filter((o) => o.id !== input.optionId)
+
+    const values = {
+      ...((page.propertyValues ?? {}) as Record<string, CellValue>),
+    }
+    const current = values[input.propertyId]
+    if (current === input.optionId) {
+      values[input.propertyId] = null
+    } else if (Array.isArray(current) && current.includes(input.optionId)) {
+      values[input.propertyId] = current.filter((id) => id !== input.optionId)
+    }
+
+    await this.db
+      .update(pageTable)
+      .set({
+        properties: properties as DbCollectionField[],
+        propertyValues: values as JsonRecord,
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(pageTable.id, page.id))
+
+    return { ok: true }
+  }
+
+  private async readPageProperties(pageId: string): Promise<{
+    page: typeof pageTable.$inferSelect
+    properties: DatabaseProperty[]
+  }> {
+    const page = await this.assertPageInOrg(pageId)
+    const properties = ((page.properties ?? []) as DatabaseProperty[]).map(
+      (property) => ({
+        ...property,
+        options: property.options?.map((option) => ({ ...option })),
+      }),
+    )
+
+    return { page, properties }
+  }
+
+  private async writePageProperties(
+    pageId: string,
+    properties: DatabaseProperty[],
+  ): Promise<void> {
+    await this.db
+      .update(pageTable)
+      .set({
+        properties: properties as DbCollectionField[],
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(pageTable.id, pageId))
   }
 
   // --- Blocks ------------------------------------------------------------
@@ -1422,6 +1655,7 @@ function toPageSummary(
     icon: page.icon ?? DEFAULT_ICON,
     parentPageId: page.parentPageId ?? null,
     position: page.position,
+    createdAt: toIso(page.createdAt),
     updatedAt: toIso(page.updatedAt),
   }
 }

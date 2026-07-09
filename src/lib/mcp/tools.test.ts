@@ -14,11 +14,14 @@ function makePage(
     icon: '📄',
     parentPageId: null,
     position: 'a0',
+    createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     blocks: overrides.blocks ?? [],
     databases: [],
     ancestors: [],
     childPages: [],
+    properties: overrides.properties ?? [],
+    propertyValues: overrides.propertyValues ?? {},
   }
 }
 
@@ -50,6 +53,7 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
     icon: page.icon,
     parentPageId: page.parentPageId,
     position: page.position,
+    createdAt: page.createdAt,
     updatedAt: page.updatedAt,
   })
 

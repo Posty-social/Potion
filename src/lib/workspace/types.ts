@@ -146,6 +146,7 @@ export type WorkspacePageSummary = {
   icon: string
   parentPageId: string | null
   position: string
+  createdAt: string
   updatedAt: string
 }
 
@@ -154,6 +155,9 @@ export type WorkspacePage = WorkspacePageSummary & {
   databases: WorkspaceDatabase[]
   ancestors: WorkspacePageSummary[]
   childPages: WorkspacePageSummary[]
+  /** Page-level properties (Notion-style, shown at the top of the page). */
+  properties: DatabaseProperty[]
+  propertyValues: Record<string, CellValue>
 }
 
 /** Palette for select / status / board-column option colors. */

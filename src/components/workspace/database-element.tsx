@@ -97,7 +97,7 @@ const VIEW_TYPES: Array<{
   { type: 'calendar', label: 'Calendar', icon: CalendarIcon },
 ]
 
-const ADDABLE_TYPES: Array<Exclude<PropertyType, 'title'>> = [
+export const ADDABLE_TYPES: Array<Exclude<PropertyType, 'title'>> = [
   'text',
   'number',
   'select',
@@ -114,7 +114,7 @@ const optionById = (property: DatabaseProperty, id: unknown) =>
     ? property.options?.find((option) => option.id === id)
     : undefined
 
-const PROPERTY_TYPE_ICONS: Record<PropertyType, typeof TextIcon> = {
+export const PROPERTY_TYPE_ICONS: Record<PropertyType, typeof TextIcon> = {
   title: TypeIcon,
   text: TextIcon,
   number: HashIcon,
@@ -334,10 +334,30 @@ export function DatabaseElement({ database, mutations }: Props) {
 
       {optionsProperty ? (
         <PropertyOptionsDialog
-          database={database}
           property={optionsProperty}
-          mutations={mutations}
           onClose={() => setOptionsPropertyId(null)}
+          onAddOption={(name) =>
+            mutations.addPropertyOption({
+              databaseId: database.id,
+              propertyId: optionsProperty.id,
+              name,
+            })
+          }
+          onRenameOption={(optionId, name) =>
+            mutations.renamePropertyOption({
+              databaseId: database.id,
+              propertyId: optionsProperty.id,
+              optionId,
+              name,
+            })
+          }
+          onDeleteOption={(optionId) =>
+            mutations.deletePropertyOption({
+              databaseId: database.id,
+              propertyId: optionsProperty.id,
+              optionId,
+            })
+          }
         />
       ) : null}
     </section>
@@ -952,18 +972,17 @@ function PropertiesMenu({
  * icon-labelled list of property types below. Adds the property to the database
  * schema, so it shows up in every view and in the row peek's property list.
  */
-function PropertyTypePicker({
-  databaseId,
-  mutations,
+export function PropertyTypePicker({
+  onAdd,
   trigger,
   align = 'start',
-  onCreated,
 }: {
-  databaseId: string
-  mutations: WorkspaceMutations
+  onAdd: (
+    name: string,
+    type: Exclude<PropertyType, 'title'>,
+  ) => void | Promise<unknown>
   trigger: ReactNode
   align?: 'start' | 'end'
-  onCreated?: (propertyId: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -978,14 +997,9 @@ function PropertyTypePicker({
   const reset = () => setName('')
 
   const create = async (type: Exclude<PropertyType, 'title'>) => {
-    const result = await mutations.addProperty({
-      databaseId,
-      name: name.trim() || PROPERTY_TYPE_LABELS[type],
-      type,
-    })
+    await onAdd(name.trim() || PROPERTY_TYPE_LABELS[type], type)
     setOpen(false)
     reset()
-    onCreated?.(result.propertyId)
   }
 
   return (
@@ -1049,9 +1063,8 @@ function AddPropertyMenu({
 }) {
   return (
     <PropertyTypePicker
-      databaseId={databaseId}
-      mutations={mutations}
       align="end"
+      onAdd={(name, type) => mutations.addProperty({ databaseId, name, type })}
       trigger={
         <button
           type="button"
@@ -1086,15 +1099,13 @@ function OptionPicker({
   property,
   value,
   multiple,
-  databaseId,
-  mutations,
+  onCreateOption,
   onSave,
 }: {
   property: DatabaseProperty
   value: CellValue
   multiple: boolean
-  databaseId: string
-  mutations: WorkspaceMutations
+  onCreateOption: (name: string) => Promise<{ optionId: string }>
   onSave: (next: CellValue) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -1138,11 +1149,7 @@ function OptionPicker({
     if (!trimmed) {
       return
     }
-    const result = await mutations.addPropertyOption({
-      databaseId,
-      propertyId: property.id,
-      name: trimmed,
-    })
+    const result = await onCreateOption(trimmed)
     setQuery('')
     if (multiple) {
       onSave([...selectedIds, result.optionId])
@@ -1243,20 +1250,18 @@ function OptionPicker({
   )
 }
 
-function PropertyEditor({
+export function PropertyEditor({
   property,
   value,
-  databaseId,
-  mutations,
+  onCreateOption,
   onSave,
 }: {
   property: DatabaseProperty
   value: CellValue
-  databaseId: string
-  mutations: WorkspaceMutations
+  onCreateOption: (name: string) => Promise<{ optionId: string }>
   onSave: (next: CellValue) => void
 }) {
-  // Computed, read-only properties derived from the row's own timestamps.
+  // Computed, read-only properties derived from the record's own timestamps.
   if (COMPUTED_PROPERTY_TYPES.includes(property.type)) {
     const formatted = formatTimestamp(value)
     return (
@@ -1284,8 +1289,7 @@ function PropertyEditor({
         property={property}
         value={value}
         multiple={property.type === 'multi_select'}
-        databaseId={databaseId}
-        mutations={mutations}
+        onCreateOption={onCreateOption}
         onSave={onSave}
       />
     )
@@ -1362,8 +1366,13 @@ function TableView({
           <PropertyEditor
             property={property}
             value={info.getValue()}
-            databaseId={database.id}
-            mutations={mutations}
+            onCreateOption={(name) =>
+              mutations.addPropertyOption({
+                databaseId: database.id,
+                propertyId: property.id,
+                name,
+              })
+            }
             onSave={(next) =>
               mutations.updateRow({
                 rowId: info.row.original.id,
@@ -2273,8 +2282,13 @@ function RowPeekPanel({
                     <PropertyEditor
                       property={property}
                       value={cellValueFor(property, row)}
-                      databaseId={database.id}
-                      mutations={mutations}
+                      onCreateOption={(name) =>
+                        mutations.addPropertyOption({
+                          databaseId: database.id,
+                          propertyId: property.id,
+                          name,
+                        })
+                      }
                       onSave={(next) =>
                         mutations.updateRow({
                           rowId: row.id,
@@ -2288,8 +2302,9 @@ function RowPeekPanel({
             })}
 
             <PropertyTypePicker
-              databaseId={database.id}
-              mutations={mutations}
+              onAdd={(name, type) =>
+                mutations.addProperty({ databaseId: database.id, name, type })
+              }
               trigger={
                 <button
                   type="button"
@@ -2384,16 +2399,18 @@ function RowBodyEditor({
   )
 }
 
-function PropertyOptionsDialog({
-  database,
+export function PropertyOptionsDialog({
   property,
-  mutations,
   onClose,
+  onAddOption,
+  onRenameOption,
+  onDeleteOption,
 }: {
-  database: WorkspaceDatabase
   property: DatabaseProperty
-  mutations: WorkspaceMutations
   onClose: () => void
+  onAddOption: (name: string) => void | Promise<unknown>
+  onRenameOption: (optionId: string, name: string) => void | Promise<unknown>
+  onDeleteOption: (optionId: string) => void | Promise<unknown>
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -2413,12 +2430,7 @@ function PropertyOptionsDialog({
                 onBlur={(event) => {
                   const value = event.target.value.trim()
                   if (value && value !== option.name) {
-                    void mutations.renamePropertyOption({
-                      databaseId: database.id,
-                      propertyId: property.id,
-                      optionId: option.id,
-                      name: value,
-                    })
+                    void onRenameOption(option.id, value)
                   }
                 }}
                 className="h-8 flex-1"
@@ -2427,13 +2439,7 @@ function PropertyOptionsDialog({
               <button
                 type="button"
                 aria-label="Delete option"
-                onClick={() =>
-                  mutations.deletePropertyOption({
-                    databaseId: database.id,
-                    propertyId: property.id,
-                    optionId: option.id,
-                  })
-                }
+                onClick={() => void onDeleteOption(option.id)}
                 className="cursor-pointer text-[var(--workspace-ink-soft)] transition-colors hover:text-[var(--accent-rust)]"
               >
                 <XIcon className="size-4" />
@@ -2449,13 +2455,7 @@ function PropertyOptionsDialog({
             variant="outline"
             size="sm"
             className="mt-1 self-start"
-            onClick={() =>
-              mutations.addPropertyOption({
-                databaseId: database.id,
-                propertyId: property.id,
-                name: 'New option',
-              })
-            }
+            onClick={() => void onAddOption('New option')}
           >
             <PlusIcon className="size-4" />
             Add option

@@ -56,6 +56,7 @@ import type {
 } from '#/lib/workspace/types'
 
 import { DatabaseElement } from './database-element'
+import { PageProperties } from './page-properties'
 import {
   useWorkspaceMutations,
   type WorkspaceMutations,
@@ -112,6 +113,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
         <div className="h-[calc(100vh-3.5rem)] overflow-y-auto">
           <div className="mx-auto flex w-full flex-col gap-1 px-6 py-8 md:px-16 lg:px-24">
             <PageTitle page={page} mutations={mutations} />
+            <PageProperties page={page} mutations={mutations} />
             <BlockEditor page={page} mutations={mutations} />
             <ChildPages
               page={page}
@@ -491,12 +493,34 @@ function BlockEditor({
     [page.databases],
   )
 
+  // Which block to move the caret into after it's created (e.g. after Enter).
+  const [focusBlockId, setFocusBlockId] = useState<string | null>(null)
+
   const addBlock = (kind: AddBlockKind, afterBlockId?: string) =>
     mutations.createBlock({
       pageId: page.id,
       type: kind.type,
       afterBlockId,
       initialView: kind.view,
+    })
+
+  // Enter inside a block: insert a fresh paragraph right after it and focus it.
+  const addParagraphAfter = async (afterBlockId: string) => {
+    const { blockId } = await mutations.createBlock({
+      pageId: page.id,
+      type: 'paragraph',
+      afterBlockId,
+    })
+    setFocusBlockId(blockId)
+  }
+
+  // Typing in the trailing area: append a paragraph at the end. No afterBlockId
+  // so the server appends using a fresh end position (safe for rapid Enters).
+  const createAtEnd = (content: string) =>
+    mutations.createBlock({
+      pageId: page.id,
+      type: 'paragraph',
+      content: content || undefined,
     })
 
   return (
@@ -514,6 +538,9 @@ function BlockEditor({
             database={
               block.databaseId ? (databaseByBlock.get(block.id) ?? null) : null
             }
+            focusOnMount={block.id === focusBlockId}
+            onFocused={() => setFocusBlockId(null)}
+            onEnter={() => void addParagraphAfter(block.id)}
           />
         </BlockRow>
       ))}
@@ -522,7 +549,7 @@ function BlockEditor({
         trigger={
           <button
             type="button"
-            className="mt-2 flex items-center gap-1.5 rounded-md px-1 py-1.5 text-sm text-[var(--workspace-ink-soft)] hover:bg-[var(--workspace-hover)]"
+            className="mt-1 flex w-fit items-center gap-1.5 rounded-md px-1 py-1.5 text-sm text-[var(--workspace-ink-soft)] hover:bg-[var(--workspace-hover)]"
           >
             <PlusIcon className="size-4" />
             Add a block
@@ -530,7 +557,63 @@ function BlockEditor({
         }
         onSelect={(kind) => addBlock(kind)}
       />
+
+      {/* Notion-style: click into the empty space and just type — a paragraph
+          is created for you. Enter starts another. No need to add a block. */}
+      <TrailingType hasBlocks={page.blocks.length > 0} onCreate={createAtEnd} />
     </div>
+  )
+}
+
+/**
+ * The always-present editable area below the page's blocks. Typing here (or
+ * pressing Enter) materialises a paragraph block, so you never have to reach
+ * for the "Add a block" menu. It fills the space below the content so clicking
+ * anywhere in the empty page lands the caret here.
+ */
+function TrailingType({
+  hasBlocks,
+  onCreate,
+}: {
+  hasBlocks: boolean
+  onCreate: (content: string) => Promise<unknown>
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  const flush = (keepFocus: boolean) => {
+    const el = ref.current
+    if (!el) {
+      return
+    }
+    const value = el.value
+    el.value = ''
+    void onCreate(value)
+    if (keepFocus) {
+      el.focus()
+    }
+  }
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      placeholder={
+        hasBlocks ? '' : 'Write something, or press Enter to start a block…'
+      }
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          flush(true)
+        }
+      }}
+      onBlur={(event) => {
+        if (event.target.value.trim() !== '') {
+          flush(false)
+        }
+      }}
+      className="mt-1 min-h-[38vh] w-full resize-none bg-transparent leading-7 outline-none placeholder:text-[var(--workspace-line)]"
+      aria-label="Type to add content"
+    />
   )
 }
 
@@ -653,11 +736,17 @@ function BlockView({
   block,
   database,
   mutations,
+  focusOnMount,
+  onFocused,
+  onEnter,
 }: {
   page: WorkspacePage
   block: WorkspaceBlock
   database: WorkspaceDatabase | null
   mutations: WorkspaceMutations
+  focusOnMount?: boolean
+  onFocused?: () => void
+  onEnter?: () => void
 }) {
   if (block.type === 'divider') {
     return <hr className="my-2 border-[var(--workspace-line)]" />
@@ -688,6 +777,9 @@ function BlockView({
           page={page}
           block={block}
           mutations={mutations}
+          focusOnMount={focusOnMount}
+          onFocused={onFocused}
+          onEnter={onEnter}
           className={cn(
             'text-base',
             block.checked && 'text-[var(--workspace-ink-soft)] line-through',
@@ -706,6 +798,9 @@ function BlockView({
           page={page}
           block={block}
           mutations={mutations}
+          focusOnMount={focusOnMount}
+          onFocused={onFocused}
+          onEnter={onEnter}
           className="text-base leading-7"
           placeholder="Callout"
         />
@@ -720,6 +815,9 @@ function BlockView({
           page={page}
           block={block}
           mutations={mutations}
+          focusOnMount={focusOnMount}
+          onFocused={onFocused}
+          onEnter={onEnter}
           className="text-base leading-7 text-[var(--workspace-ink-soft)] italic"
           placeholder="Quote"
         />
@@ -741,6 +839,9 @@ function BlockView({
       page={page}
       block={block}
       mutations={mutations}
+      focusOnMount={focusOnMount}
+      onFocused={onFocused}
+      onEnter={onEnter}
       className={headingClass}
       placeholder={block.type.startsWith('heading') ? 'Heading' : 'Type here…'}
     />
@@ -753,12 +854,18 @@ function BlockTextInput({
   mutations,
   className,
   placeholder,
+  focusOnMount,
+  onFocused,
+  onEnter,
 }: {
   page: WorkspacePage
   block: WorkspaceBlock
   mutations: WorkspaceMutations
   className?: string
   placeholder?: string
+  focusOnMount?: boolean
+  onFocused?: () => void
+  onEnter?: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [editing, setEditing] = useState(false)
@@ -782,6 +889,18 @@ function BlockTextInput({
       resize()
     }
   }, [editing])
+
+  // A freshly created block (e.g. via Enter) asks to receive the caret.
+  useEffect(() => {
+    const el = ref.current
+    if (focusOnMount && el) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+      resize()
+      onFocused?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusOnMount])
 
   // Rendered (read) mode: show formatted Markdown until the user clicks in.
   // Empty blocks skip this so the placeholder + caret are immediately usable.
@@ -812,6 +931,14 @@ function BlockTextInput({
       placeholder={placeholder}
       rows={1}
       onInput={resize}
+      onKeyDown={(event) => {
+        // Enter starts a new block (Shift+Enter inserts a newline). The edited
+        // content is committed by the blur that follows the focus move.
+        if (event.key === 'Enter' && !event.shiftKey && onEnter) {
+          event.preventDefault()
+          onEnter()
+        }
+      }}
       onBlur={(event) => {
         const value = event.target.value
         setEditing(false)

@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo } from 'react'
 
 import {
+  addWorkspacePageProperty,
+  addWorkspacePagePropertyOption,
   addWorkspaceProperty,
   addWorkspacePropertyOption,
   addWorkspaceRow,
@@ -10,16 +12,20 @@ import {
   createWorkspacePage,
   deleteWorkspaceBlock,
   deleteWorkspacePage,
+  deleteWorkspacePageProperty,
+  deleteWorkspacePagePropertyOption,
   deleteWorkspaceProperty,
   deleteWorkspacePropertyOption,
   deleteWorkspaceRow,
   deleteWorkspaceView,
   renameWorkspaceDatabase,
   renameWorkspacePage,
+  renameWorkspacePagePropertyOption,
   renameWorkspacePropertyOption,
   renameWorkspaceView,
   setWorkspaceBlockChecked,
   setWorkspacePageIcon,
+  setWorkspacePagePropertyValue,
   setWorkspaceViewDateProperty,
   setWorkspaceViewFilters,
   setWorkspaceViewGroupBy,
@@ -27,6 +33,7 @@ import {
   setWorkspaceViewSorts,
   setWorkspaceViewType,
   updateWorkspaceBlock,
+  updateWorkspacePageProperty,
   updateWorkspaceProperty,
   updateWorkspaceRow,
   updateWorkspaceRowBody,
@@ -71,6 +78,41 @@ export function useWorkspaceMutations() {
         run(setWorkspacePageIcon({ data: input })),
       deletePage: (input: { pageId: string }) =>
         run(deleteWorkspacePage({ data: input })),
+      // Page properties
+      addPageProperty: (input: {
+        pageId: string
+        name: string
+        type: OptionPropertyType
+      }) => run(addWorkspacePageProperty({ data: input })),
+      updatePageProperty: (input: {
+        pageId: string
+        propertyId: string
+        name?: string
+        type?: OptionPropertyType
+      }) => run(updateWorkspacePageProperty({ data: input })),
+      deletePageProperty: (input: { pageId: string; propertyId: string }) =>
+        run(deleteWorkspacePageProperty({ data: input })),
+      setPagePropertyValue: (input: {
+        pageId: string
+        propertyId: string
+        value: CellValue
+      }) => run(setWorkspacePagePropertyValue({ data: input })),
+      addPagePropertyOption: (input: {
+        pageId: string
+        propertyId: string
+        name: string
+      }) => run(addWorkspacePagePropertyOption({ data: input })),
+      renamePagePropertyOption: (input: {
+        pageId: string
+        propertyId: string
+        optionId: string
+        name: string
+      }) => run(renameWorkspacePagePropertyOption({ data: input })),
+      deletePagePropertyOption: (input: {
+        pageId: string
+        propertyId: string
+        optionId: string
+      }) => run(deleteWorkspacePagePropertyOption({ data: input })),
       // Blocks
       createBlock: (input: {
         pageId: string

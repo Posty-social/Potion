@@ -11,6 +11,8 @@ import {
   type WorkspaceRepository,
 } from './repository'
 import {
+  addPagePropertyOptionSchema,
+  addPagePropertySchema,
   addPropertyOptionSchema,
   addPropertySchema,
   addRowSchema,
@@ -18,6 +20,8 @@ import {
   createBlockSchema,
   createPageSchema,
   deleteBlockSchema,
+  deletePagePropertyOptionSchema,
+  deletePagePropertySchema,
   deletePageSchema,
   deletePropertyOptionSchema,
   deletePropertySchema,
@@ -26,11 +30,13 @@ import {
   getPageSchema,
   importTextSchema,
   renameDatabaseSchema,
+  renamePagePropertyOptionSchema,
   renamePageSchema,
   renamePropertyOptionSchema,
   renameViewSchema,
   setBlockCheckedSchema,
   setPageIconSchema,
+  setPagePropertyValueSchema,
   setViewDatePropertySchema,
   setViewFiltersSchema,
   setViewGroupBySchema,
@@ -38,6 +44,7 @@ import {
   setViewSortsSchema,
   setViewTypeSchema,
   updateBlockSchema,
+  updatePagePropertySchema,
   updatePropertySchema,
   updateRowBodySchema,
   updateRowSchema,
@@ -93,6 +100,54 @@ export const setWorkspacePageIcon = createServerFn({ method: 'POST' })
 export const deleteWorkspacePage = createServerFn({ method: 'POST' })
   .validator(deletePageSchema)
   .handler(async ({ data }) => (await requireRepository()).deletePage(data))
+
+// --- Page property mutations ---------------------------------------------
+
+export const addWorkspacePageProperty = createServerFn({ method: 'POST' })
+  .validator(addPagePropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).addPageProperty(data),
+  )
+
+export const updateWorkspacePageProperty = createServerFn({ method: 'POST' })
+  .validator(updatePagePropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).updatePageProperty(data),
+  )
+
+export const deleteWorkspacePageProperty = createServerFn({ method: 'POST' })
+  .validator(deletePagePropertySchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).deletePageProperty(data),
+  )
+
+export const setWorkspacePagePropertyValue = createServerFn({ method: 'POST' })
+  .validator(setPagePropertyValueSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).setPagePropertyValue(data),
+  )
+
+export const addWorkspacePagePropertyOption = createServerFn({ method: 'POST' })
+  .validator(addPagePropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).addPagePropertyOption(data),
+  )
+
+export const renameWorkspacePagePropertyOption = createServerFn({
+  method: 'POST',
+})
+  .validator(renamePagePropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).renamePagePropertyOption(data),
+  )
+
+export const deleteWorkspacePagePropertyOption = createServerFn({
+  method: 'POST',
+})
+  .validator(deletePagePropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).deletePagePropertyOption(data),
+  )
 
 // --- Block mutations -----------------------------------------------------
 

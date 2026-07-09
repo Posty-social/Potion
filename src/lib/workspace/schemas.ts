@@ -193,6 +193,42 @@ export const updateRowBodySchema = z.object({
 })
 export const deleteRowSchema = z.object({ rowId: id })
 
+// --- Page properties -----------------------------------------------------
+
+export const addPagePropertySchema = z.object({
+  pageId: id,
+  name: z.string().min(1).max(80),
+  type: propertyTypeSchema,
+})
+export const updatePagePropertySchema = z.object({
+  pageId: id,
+  propertyId: id,
+  name: z.string().min(1).max(80).optional(),
+  type: propertyTypeSchema.optional(),
+})
+export const deletePagePropertySchema = z.object({ pageId: id, propertyId: id })
+export const setPagePropertyValueSchema = z.object({
+  pageId: id,
+  propertyId: id,
+  value: cellValueSchema,
+})
+export const addPagePropertyOptionSchema = z.object({
+  pageId: id,
+  propertyId: id,
+  name: z.string().min(1).max(80),
+})
+export const renamePagePropertyOptionSchema = z.object({
+  pageId: id,
+  propertyId: id,
+  optionId: id,
+  name: z.string().min(1).max(80),
+})
+export const deletePagePropertyOptionSchema = z.object({
+  pageId: id,
+  propertyId: id,
+  optionId: id,
+})
+
 // --- Import --------------------------------------------------------------
 
 export const importTextSchema = z.object({

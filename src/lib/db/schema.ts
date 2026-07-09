@@ -121,6 +121,14 @@ export const page = sqliteTable(
     coverAssetId: text('cover_asset_id').references(() => asset.id, {
       onDelete: 'set null',
     }),
+    // Notion-style page properties: a per-page schema of typed properties plus
+    // the values keyed by property id. Empty for a plain page.
+    properties: jsonText<CollectionField[]>('properties')
+      .notNull()
+      .default(sql`'[]'`),
+    propertyValues: jsonText<JsonRecord>('property_values')
+      .notNull()
+      .default(sql`'{}'`),
     position: text('position').notNull(),
     isArchived: integer('is_archived', { mode: 'boolean' })
       .notNull()
