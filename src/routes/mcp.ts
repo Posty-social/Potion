@@ -19,13 +19,23 @@ import {
 export const Route = createFileRoute('/mcp')({
   server: {
     handlers: {
-      GET: () =>
-        Response.json({
+      GET: ({ request }) => {
+        // Streamable-HTTP MCP clients GET this endpoint expecting a
+        // server-initiated SSE stream and reconnect the instant it closes.
+        // We don't offer one, so per the MCP spec answer 405 — otherwise
+        // idle clients loop ~1 req/s indefinitely (this alone produced
+        // >120k requests/day). Plain browser GETs still get the info JSON.
+        if (request.headers.get('accept')?.includes('text/event-stream')) {
+          return new Response(null, { status: 405, headers: { Allow: 'POST' } })
+        }
+
+        return Response.json({
           name: 'Potion MCP',
           status: 'ready',
           transport: 'streamable-http',
           tools: mcpToolDefinitions,
-        }),
+        })
+      },
       POST: async ({ request }) => {
         const body = await request.json().catch(() => null)
         const context = await resolveMcpContext(request.headers)
