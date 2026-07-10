@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  check,
   index,
   integer,
   sqliteTable,
@@ -158,6 +159,26 @@ export const page = sqliteTable(
       table.position,
     ),
     uniqueIndex('page_org_slug_idx').on(table.organizationId, table.slug),
+  ],
+)
+
+// A user's pinned songs: up to 4 pins, ordered by position.
+export const userPin = sqliteTable(
+  'user_pin',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    songId: text('song_id').notNull(),
+    position: integer('position').notNull().default(1),
+    createdAt: timestamp('created_at'),
+  },
+  (table) => [
+    index('user_pin_user_id_idx').on(table.userId),
+    uniqueIndex('user_pin_user_song_idx').on(table.userId, table.songId),
+    // Each user gets at most 4 pin slots.
+    check('user_pin_position_limit', sql`${table.position} BETWEEN 1 AND 4`),
   ],
 )
 
