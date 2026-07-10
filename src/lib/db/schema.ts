@@ -25,6 +25,7 @@ export type BlockType =
   | 'code'
   | 'divider'
   | 'image'
+  | 'video'
   | 'file'
   | 'bookmark'
   | 'page_link'

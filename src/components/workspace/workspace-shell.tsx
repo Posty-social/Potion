@@ -23,6 +23,8 @@ import {
   Table2Icon,
   TextIcon,
   Trash2Icon,
+  UploadIcon,
+  VideoIcon,
 } from 'lucide-react'
 import {
   useEffect,
@@ -45,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { Input } from '#/components/ui/input'
+import { createAssetUploadIntent } from '#/lib/assets/functions'
 import { authClient } from '#/lib/auth-client'
 import { cn } from '#/lib/utils'
 import { renderInline } from '#/lib/workspace/markdown'
@@ -71,6 +74,52 @@ import { WorkspaceSwitcher } from './workspace-switcher'
 type WorkspaceShellProps = {
   page: WorkspacePage
   pages: WorkspacePageSummary[]
+}
+
+/**
+ * Upload an image/video and return the stable app URL to store as block
+ * content. The server mints a presigned R2 PUT (auth-gated, key/type/size
+ * all signed) and the browser uploads straight to R2; when signing
+ * credentials are absent (local dev) it falls back to uploading through
+ * the app.
+ */
+async function uploadAsset(file: File): Promise<string> {
+  const intent = await createAssetUploadIntent({
+    data: { fileName: file.name, mime: file.type, sizeBytes: file.size },
+  })
+
+  if (intent.configured) {
+    const response = await fetch(intent.uploadUrl, {
+      method: 'PUT',
+      headers: intent.headers,
+      body: file,
+    })
+    if (!response.ok) {
+      throw new Error('Could not upload the file.')
+    }
+    return intent.servePath
+  }
+
+  const response = await fetch('/api/assets/upload', {
+    method: 'POST',
+    headers: { 'content-type': file.type, 'x-file-name': file.name },
+    body: file,
+  })
+  if (!response.ok) {
+    throw new Error('Could not upload the file.')
+  }
+  const { url } = (await response.json()) as { url: string }
+  return url
+}
+
+function mediaBlockType(file: File): 'image' | 'video' | null {
+  if (file.type.startsWith('image/')) {
+    return 'image'
+  }
+  if (file.type.startsWith('video/')) {
+    return 'video'
+  }
+  return null
 }
 
 export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
@@ -581,31 +630,24 @@ function BlockEditor({
   const [focusBlockId, setFocusBlockId] = useState<string | null>(null)
 
   // Choosing "Image" opens a file picker instead of creating a block; the
-  // block is created once the upload lands. The ref remembers where.
-  const imageInputRef = useRef<HTMLInputElement>(null)
-  const imageAfterBlockId = useRef<string | undefined>(undefined)
-  const imageUpload = useMutation({
-    mutationFn: async (file: File) => {
-      const response = await fetch('/api/assets/upload', {
-        method: 'POST',
-        headers: { 'content-type': file.type, 'x-file-name': file.name },
-        body: file,
-      })
-      if (!response.ok) {
-        throw new Error('Could not upload the image.')
-      }
-      const { url } = (await response.json()) as { url: string }
-      return url
-    },
-  })
+  // block is created once the upload lands. The ref remembers where. "Video"
+  // instead creates an empty block whose placeholder offers upload OR a
+  // YouTube/Vimeo/file link, since videos are as often embedded as uploaded.
+  const mediaInputRef = useRef<HTMLInputElement>(null)
+  const mediaAfterBlockId = useRef<string | undefined>(undefined)
+  const mediaUpload = useMutation({ mutationFn: uploadAsset })
 
-  const insertImages = async (files: File[], afterBlockId?: string) => {
+  const insertMedia = async (files: File[], afterBlockId?: string) => {
     let cursor = afterBlockId
-    for (const file of files.filter((f) => f.type.startsWith('image/'))) {
-      const url = await imageUpload.mutateAsync(file)
+    for (const file of files) {
+      const type = mediaBlockType(file)
+      if (!type) {
+        continue
+      }
+      const url = await mediaUpload.mutateAsync(file)
       const { blockId } = await mutations.createBlock({
         pageId: page.id,
-        type: 'image',
+        type,
         content: url,
         afterBlockId: cursor,
       })
@@ -618,8 +660,8 @@ function BlockEditor({
 
   const addBlock = (kind: AddBlockKind, afterBlockId?: string) => {
     if (kind.type === 'image') {
-      imageAfterBlockId.current = afterBlockId
-      imageInputRef.current?.click()
+      mediaAfterBlockId.current = afterBlockId
+      mediaInputRef.current?.click()
       return
     }
     return mutations.createBlock({
@@ -656,9 +698,9 @@ function BlockEditor({
       className="flex flex-col"
       onPaste={(event) => {
         const files = Array.from(event.clipboardData?.files ?? [])
-        if (files.some((f) => f.type.startsWith('image/'))) {
+        if (files.some(mediaBlockType)) {
           event.preventDefault()
-          void insertImages(files)
+          void insertMedia(files)
         }
       }}
       onDragOver={(event) => {
@@ -668,9 +710,9 @@ function BlockEditor({
       }}
       onDrop={(event) => {
         const files = Array.from(event.dataTransfer?.files ?? [])
-        if (files.some((f) => f.type.startsWith('image/'))) {
+        if (files.some(mediaBlockType)) {
           event.preventDefault()
-          void insertImages(files)
+          void insertMedia(files)
         }
       }}
     >
@@ -695,7 +737,7 @@ function BlockEditor({
       ))}
 
       <input
-        ref={imageInputRef}
+        ref={mediaInputRef}
         type="file"
         accept="image/*"
         multiple
@@ -704,18 +746,18 @@ function BlockEditor({
         onChange={(event) => {
           const files = Array.from(event.target.files ?? [])
           event.target.value = ''
-          void insertImages(files, imageAfterBlockId.current)
+          void insertMedia(files, mediaAfterBlockId.current)
         }}
       />
 
-      {imageUpload.isPending ? (
+      {mediaUpload.isPending ? (
         <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--workspace-line)] px-3 py-2 text-sm text-[var(--workspace-ink-soft)]">
-          <ImageIcon className="size-4 animate-pulse" />
-          Uploading image…
+          <UploadIcon className="size-4 animate-pulse" />
+          Uploading…
         </div>
-      ) : imageUpload.isError ? (
+      ) : mediaUpload.isError ? (
         <p className="mt-1 text-sm text-[var(--accent-rust)]">
-          {imageUpload.error.message}
+          {mediaUpload.error.message}
         </p>
       ) : null}
 
@@ -847,6 +889,7 @@ const BASIC_ITEMS: AddMenuItem[] = [
   { label: 'Callout', icon: SparklesIcon, kind: { type: 'callout' } },
   { label: 'Divider', icon: MinusIcon, kind: { type: 'divider' } },
   { label: 'Image', icon: ImageIcon, kind: { type: 'image' } },
+  { label: 'Video', icon: VideoIcon, kind: { type: 'video' } },
 ]
 
 // Each database "view type" creates a database (the storage) opening in that
@@ -928,7 +971,11 @@ function BlockView({
   }
 
   if (block.type === 'image') {
-    return <ImageBlock block={block} />
+    return <ImageBlock page={page} block={block} mutations={mutations} />
+  }
+
+  if (block.type === 'video') {
+    return <VideoBlock page={page} block={block} mutations={mutations} />
   }
 
   if (block.type === 'database') {
@@ -1027,16 +1074,30 @@ function BlockView({
   )
 }
 
-function ImageBlock({ block }: { block: WorkspaceBlock }) {
+type MediaBlockProps = {
+  page: WorkspacePage
+  block: WorkspaceBlock
+  mutations: WorkspaceMutations
+}
+
+function ImageBlock({ page, block, mutations }: MediaBlockProps) {
   const url = block.content.trim()
 
-  // An image block with no URL yet (e.g. created over MCP without content).
   if (!url) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--workspace-line)] px-3 py-2 text-sm text-[var(--workspace-ink-soft)]">
-        <ImageIcon className="size-4" />
-        No image yet — delete this block and add the image again.
-      </div>
+      <MediaPlaceholder
+        kind="image"
+        onReady={(value) =>
+          void mutations
+            .updateBlock({
+              pageId: page.id,
+              blockId: block.id,
+              content: value,
+              version: block.version,
+            })
+            .catch(() => mutations.invalidate())
+        }
+      />
     )
   }
 
@@ -1049,6 +1110,173 @@ function ImageBlock({ block }: { block: WorkspaceBlock }) {
       loading="lazy"
       className="my-1 max-h-[36rem] max-w-full rounded-lg border border-[var(--workspace-line)]"
     />
+  )
+}
+
+function VideoBlock({ page, block, mutations }: MediaBlockProps) {
+  const url = block.content.trim()
+
+  if (!url) {
+    return (
+      <MediaPlaceholder
+        kind="video"
+        onReady={(value) =>
+          void mutations
+            .updateBlock({
+              pageId: page.id,
+              blockId: block.id,
+              content: value,
+              version: block.version,
+            })
+            .catch(() => mutations.invalidate())
+        }
+      />
+    )
+  }
+
+  const embed = videoEmbedUrl(url)
+
+  if (embed) {
+    return (
+      <iframe
+        src={embed}
+        title="Embedded video"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        className="my-1 aspect-video w-full rounded-lg border border-[var(--workspace-line)]"
+      />
+    )
+  }
+
+  return (
+    // eslint-disable-next-line jsx-a11y/media-has-caption -- user uploads have no track
+    <video
+      src={url}
+      controls
+      preload="metadata"
+      className="my-1 max-h-[36rem] w-full rounded-lg border border-[var(--workspace-line)]"
+    />
+  )
+}
+
+/**
+ * Player URL for recognised embed hosts (YouTube/Vimeo); null means the URL
+ * should play in a <video> element instead. Only allowlisted hosts become
+ * iframes — arbitrary URLs never do.
+ */
+function videoEmbedUrl(raw: string): string | null {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+
+  const host = url.hostname.replace(/^(www|m)\./, '')
+
+  if (host === 'youtube.com') {
+    const id =
+      url.pathname.startsWith('/shorts/') || url.pathname.startsWith('/embed/')
+        ? url.pathname.split('/')[2]
+        : url.searchParams.get('v')
+    return id
+      ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`
+      : null
+  }
+
+  if (host === 'youtu.be') {
+    const id = url.pathname.slice(1).split('/')[0]
+    return id
+      ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`
+      : null
+  }
+
+  if (host === 'vimeo.com') {
+    const id = /^\/(\d+)/.exec(url.pathname)?.[1]
+    return id ? `https://player.vimeo.com/video/${id}` : null
+  }
+
+  return null
+}
+
+/**
+ * Empty media block: upload a file or paste a link. Used when an image/video
+ * block exists without content (Video inserts start here; MCP can also
+ * create bare blocks).
+ */
+function MediaPlaceholder({
+  kind,
+  onReady,
+}: {
+  kind: 'image' | 'video'
+  onReady: (url: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [link, setLink] = useState('')
+  const upload = useMutation({ mutationFn: uploadAsset })
+
+  const submitLink = () => {
+    const value = link.trim()
+    if (value) {
+      onReady(value)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-dashed border-[var(--workspace-line)] p-3">
+      <input
+        ref={inputRef}
+        type="file"
+        accept={`${kind}/*`}
+        className="hidden"
+        aria-label={`Upload ${kind}`}
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (file) {
+            void upload
+              .mutateAsync(file)
+              .then(onReady)
+              .catch(() => {
+                // Surfaced via upload.isError below.
+              })
+          }
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={upload.isPending}
+          onClick={() => inputRef.current?.click()}
+        >
+          <UploadIcon className="size-4" />
+          {upload.isPending ? 'Uploading…' : `Upload ${kind}`}
+        </Button>
+        <span className="text-xs text-[var(--workspace-ink-soft)]">
+          or embed a link
+        </span>
+        <Input
+          value={link}
+          onChange={(event) => setLink(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submitLink()
+            }
+          }}
+          placeholder={
+            kind === 'video' ? 'YouTube, Vimeo, or video URL' : 'Image URL'
+          }
+          className="h-8 w-64"
+        />
+      </div>
+      {upload.isError ? (
+        <p className="text-sm text-[var(--accent-rust)]">
+          {upload.error.message}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

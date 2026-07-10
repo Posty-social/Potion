@@ -1,12 +1,44 @@
 import { z } from 'zod'
 
-export const maxAssetUploadBytes = 50 * 1024 * 1024
+export const maxImageUploadBytes = 10 * 1024 * 1024
+export const maxVideoUploadBytes = 50 * 1024 * 1024
 
-export const assetUploadIntentSchema = z.object({
-  fileName: z.string().min(1).max(180),
-  mime: z.string().regex(/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i),
-  sizeBytes: z.number().int().min(1).max(maxAssetUploadBytes),
-})
+/**
+ * Upload size limit for an asset MIME type, or null when the type isn't
+ * allowed at all. Only images and videos may be uploaded.
+ */
+export function assetUploadLimit(mime: string): number | null {
+  if (mime.startsWith('image/')) {
+    return maxImageUploadBytes
+  }
+  if (mime.startsWith('video/')) {
+    return maxVideoUploadBytes
+  }
+  return null
+}
+
+export const assetUploadIntentSchema = z
+  .object({
+    fileName: z.string().min(1).max(180),
+    mime: z.string().regex(/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i),
+    sizeBytes: z.number().int().min(1),
+  })
+  .superRefine((data, ctx) => {
+    const limit = assetUploadLimit(data.mime)
+    if (limit === null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['mime'],
+        message: 'Only image and video uploads are allowed.',
+      })
+    } else if (data.sizeBytes > limit) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sizeBytes'],
+        message: `File is too large (max ${Math.round(limit / 1024 / 1024)}MB).`,
+      })
+    }
+  })
 
 export type AssetUploadIntentInput = z.infer<typeof assetUploadIntentSchema>
 
