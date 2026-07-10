@@ -1177,7 +1177,7 @@
       "checkConstraints": {
         "user_pin_position_limit": {
           "name": "user_pin_position_limit",
-          "value": "\"user_pin\".\"position\" BETWEEN 1 AND 4"
+          "value": "\"user_pin\".\"position\" BETWEEN 1 AND 20"
         }
       }
     },

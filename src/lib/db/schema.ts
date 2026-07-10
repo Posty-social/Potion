@@ -162,7 +162,7 @@ export const page = sqliteTable(
   ],
 )
 
-// A user's pinned songs: up to 4 pins, ordered by position.
+// A user's pinned songs: up to 20 pins, ordered by position.
 export const userPin = sqliteTable(
   'user_pin',
   {
@@ -177,8 +177,8 @@ export const userPin = sqliteTable(
   (table) => [
     index('user_pin_user_id_idx').on(table.userId),
     uniqueIndex('user_pin_user_song_idx').on(table.userId, table.songId),
-    // Each user gets at most 4 pin slots.
-    check('user_pin_position_limit', sql`${table.position} BETWEEN 1 AND 4`),
+    // Each user gets at most 20 pin slots.
+    check('user_pin_position_limit', sql`${table.position} BETWEEN 1 AND 20`),
   ],
 )
 
