@@ -7,6 +7,7 @@ import {
 import {
   addPagePropertyOptionSchema,
   addPagePropertySchema,
+  addPropertySchema,
   addRowSchema,
   attachPagePropertySchema,
   createBlockSchema,
@@ -25,6 +26,7 @@ import {
   setPagePropertyValueSchema,
   updateBlockSchema,
   updatePagePropertySchema,
+  updatePropertySchema,
   updateRowSchema,
 } from '#/lib/workspace/schemas'
 
@@ -46,6 +48,8 @@ export type McpRepository = Pick<
   | 'addRow'
   | 'updateRow'
   | 'deleteRow'
+  | 'addProperty'
+  | 'updateProperty'
   | 'importText'
   | 'listWorkspaceProperties'
   | 'addPageProperty'
@@ -74,6 +78,8 @@ const mcpToolNames = [
   'add_row',
   'update_row',
   'delete_row',
+  'add_database_property',
+  'update_database_property',
   'import_text',
   'list_workspace_properties',
   'add_page_property',
@@ -423,6 +429,41 @@ export const mcpToolDefinitions = [
     },
   },
   {
+    name: 'add_database_property',
+    description:
+      'Add a column (property) to a database. Returns the new propertyId; set cell values with add_row/update_row. Value shapes match set_page_property (e.g. a `page` column stores a workspace page id and renders as a link to that page).',
+    annotations: { title: 'Add database column' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        databaseId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        type: { type: 'string', enum: [...PROPERTY_TYPE_VALUES] },
+        ...workspaceIdProperty,
+      },
+      required: ['databaseId', 'name', 'type'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_database_property',
+    description:
+      'Rename or retype a database column. The title column cannot be retyped.',
+    annotations: { title: 'Update database column', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        databaseId: { type: 'string' },
+        propertyId: { type: 'string' },
+        name: { type: 'string', maxLength: 80 },
+        type: { type: 'string', enum: [...PROPERTY_TYPE_VALUES] },
+        ...workspaceIdProperty,
+      },
+      required: ['databaseId', 'propertyId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'import_text',
     description: 'Import sanitized text as a new page.',
     annotations: { title: 'Import text' },
@@ -617,8 +658,10 @@ const serverInstructions = [
   'shows the catalog, attach_page_property reuses one on a page, add_page_property',
   'creates a new one, and set_page_property sets a value (ids come from read_page).',
   'Editing a shared property or its select options changes it on every page that',
-  'uses it. Writes are scoped to the chosen workspace; delete/remove tools are',
-  'destructive and cannot be undone.',
+  'uses it. Databases have their own per-database columns: add_database_property',
+  'adds one, update_database_property renames or retypes it, and cell values are',
+  'set through add_row/update_row. Writes are scoped to the chosen workspace;',
+  'delete/remove tools are destructive and cannot be undone.',
 ].join(' ')
 
 // Pages are also exposed as MCP resources for the primary workspace.
@@ -952,6 +995,20 @@ export async function callMcpTool(
   if (tool === 'delete_row') {
     const data = deleteRowSchema.parse(rest ?? {})
     const result = await repository.deleteRow(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'add_database_property') {
+    const data = addPropertySchema.parse(rest ?? {})
+    const result = await repository.addProperty(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'update_database_property') {
+    const data = updatePropertySchema.parse(rest ?? {})
+    const result = await repository.updateProperty(data)
 
     return toolResult(result)
   }

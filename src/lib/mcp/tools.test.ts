@@ -121,6 +121,12 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
     async deleteRow() {
       return { ok: true as const }
     },
+    async addProperty() {
+      return { propertyId: 'prop_new' }
+    },
+    async updateProperty() {
+      return { ok: true as const }
+    },
     async updateBlock(input) {
       const page = pages.find((candidate) => candidate.id === input.pageId)
       const block = page?.blocks.find(
@@ -439,12 +445,51 @@ describe('MCP workspace tools', () => {
         'add_row',
         'update_row',
         'delete_row',
+        'add_database_property',
+        'update_database_property',
       ]),
     )
     expect(
       tools.find((tool) => tool.name === 'delete_page')?.annotations
         ?.destructiveHint,
     ).toBe(true)
+  })
+
+  it('adds and updates database columns', async () => {
+    const repository = createFakeRepository()
+    const context = { repository }
+    const call = (id: number, name: string, args: Record<string, unknown>) =>
+      resolveMcpHttpRequest(
+        {
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: { name, arguments: args },
+        },
+        context,
+      )
+
+    const added = (await call(30, 'add_database_property', {
+      databaseId: 'database_tasks',
+      name: 'Linked page',
+      type: 'page',
+    })) as { body: { result: { structuredContent: { propertyId: string } } } }
+    expect(added.body.result.structuredContent.propertyId).toBe('prop_new')
+
+    const updated = (await call(31, 'update_database_property', {
+      databaseId: 'database_tasks',
+      propertyId: 'prop_new',
+      name: 'Page',
+    })) as { body: { result: { structuredContent: { ok: boolean } } } }
+    expect(updated.body.result.structuredContent.ok).toBe(true)
+
+    // Unknown property types are rejected before reaching the repository.
+    const rejected = (await call(32, 'add_database_property', {
+      databaseId: 'database_tasks',
+      name: 'Bad',
+      type: 'title',
+    })) as { body: { error?: unknown } }
+    expect(rejected.body.error).toBeDefined()
   })
 
   it('shares page property definitions across pages via the catalog', async () => {
