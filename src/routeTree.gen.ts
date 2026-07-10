@@ -24,6 +24,7 @@ import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accep
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known.oauth-protected-resource'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiAssetsSplatRouteImport } from './routes/api/assets/$'
 import { Route as ApiUsersUserIdAvatarRouteImport } from './routes/api/users/$userId/avatar'
 import { Route as ApiRealtimePagesPageIdRouteImport } from './routes/api/realtime/pages/$pageId'
 
@@ -105,6 +106,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAssetsSplatRoute = ApiAssetsSplatRouteImport.update({
+  id: '/api/assets/$',
+  path: '/api/assets/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiUsersUserIdAvatarRoute = ApiUsersUserIdAvatarRouteImport.update({
   id: '/api/users/$userId/avatar',
   path: '/api/users/$userId/avatar',
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/settings/members': typeof SettingsMembersRoute
   '/settings/properties': typeof SettingsPropertiesRoute
   '/settings/': typeof SettingsIndexRoute
+  '/api/assets/$': typeof ApiAssetsSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
   '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/settings/members': typeof SettingsMembersRoute
   '/settings/properties': typeof SettingsPropertiesRoute
   '/settings': typeof SettingsIndexRoute
+  '/api/assets/$': typeof ApiAssetsSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
   '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
@@ -169,6 +177,7 @@ export interface FileRoutesById {
   '/settings/members': typeof SettingsMembersRoute
   '/settings/properties': typeof SettingsPropertiesRoute
   '/settings/': typeof SettingsIndexRoute
+  '/api/assets/$': typeof ApiAssetsSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/realtime/pages/$pageId': typeof ApiRealtimePagesPageIdRoute
   '/api/users/$userId/avatar': typeof ApiUsersUserIdAvatarRoute
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/properties'
     | '/settings/'
+    | '/api/assets/$'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
     | '/api/users/$userId/avatar'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/properties'
     | '/settings'
+    | '/api/assets/$'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
     | '/api/users/$userId/avatar'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/properties'
     | '/settings/'
+    | '/api/assets/$'
     | '/api/auth/$'
     | '/api/realtime/pages/$pageId'
     | '/api/users/$userId/avatar'
@@ -243,6 +255,7 @@ export interface RootRouteChildren {
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
   PPageSlugRoute: typeof PPageSlugRoute
+  ApiAssetsSplatRoute: typeof ApiAssetsSplatRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiRealtimePagesPageIdRoute: typeof ApiRealtimePagesPageIdRoute
   ApiUsersUserIdAvatarRoute: typeof ApiUsersUserIdAvatarRoute
@@ -355,6 +368,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/assets/$': {
+      id: '/api/assets/$'
+      path: '/api/assets/$'
+      fullPath: '/api/assets/$'
+      preLoaderRoute: typeof ApiAssetsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/users/$userId/avatar': {
       id: '/api/users/$userId/avatar'
       path: '/api/users/$userId/avatar'
@@ -403,6 +423,7 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthProtectedResourceRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
   PPageSlugRoute: PPageSlugRoute,
+  ApiAssetsSplatRoute: ApiAssetsSplatRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiRealtimePagesPageIdRoute: ApiRealtimePagesPageIdRoute,
   ApiUsersUserIdAvatarRoute: ApiUsersUserIdAvatarRoute,

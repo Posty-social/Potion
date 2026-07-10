@@ -1,3 +1,4 @@
+import { useMutation } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
   CalendarIcon,
@@ -7,6 +8,7 @@ import {
   Heading1Icon,
   Heading2Icon,
   Heading3Icon,
+  ImageIcon,
   KanbanSquareIcon,
   ListChecksIcon,
   ListIcon,
@@ -578,13 +580,55 @@ function BlockEditor({
   // Which block to move the caret into after it's created (e.g. after Enter).
   const [focusBlockId, setFocusBlockId] = useState<string | null>(null)
 
-  const addBlock = (kind: AddBlockKind, afterBlockId?: string) =>
-    mutations.createBlock({
+  // Choosing "Image" opens a file picker instead of creating a block; the
+  // block is created once the upload lands. The ref remembers where.
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const imageAfterBlockId = useRef<string | undefined>(undefined)
+  const imageUpload = useMutation({
+    mutationFn: async (file: File) => {
+      const response = await fetch('/api/assets/upload', {
+        method: 'POST',
+        headers: { 'content-type': file.type, 'x-file-name': file.name },
+        body: file,
+      })
+      if (!response.ok) {
+        throw new Error('Could not upload the image.')
+      }
+      const { url } = (await response.json()) as { url: string }
+      return url
+    },
+  })
+
+  const insertImages = async (files: File[], afterBlockId?: string) => {
+    let cursor = afterBlockId
+    for (const file of files.filter((f) => f.type.startsWith('image/'))) {
+      const url = await imageUpload.mutateAsync(file)
+      const { blockId } = await mutations.createBlock({
+        pageId: page.id,
+        type: 'image',
+        content: url,
+        afterBlockId: cursor,
+      })
+      // Keep multiple files in order when inserting mid-page.
+      if (cursor !== undefined) {
+        cursor = blockId
+      }
+    }
+  }
+
+  const addBlock = (kind: AddBlockKind, afterBlockId?: string) => {
+    if (kind.type === 'image') {
+      imageAfterBlockId.current = afterBlockId
+      imageInputRef.current?.click()
+      return
+    }
+    return mutations.createBlock({
       pageId: page.id,
       type: kind.type,
       afterBlockId,
       initialView: kind.view,
     })
+  }
 
   // Enter inside a block: insert a fresh paragraph right after it and focus it.
   const addParagraphAfter = async (afterBlockId: string) => {
@@ -606,7 +650,30 @@ function BlockEditor({
     })
 
   return (
-    <div className="flex flex-col">
+    // Pasting or dropping image files anywhere in the editor uploads them and
+    // appends image blocks (text paste inside blocks is untouched).
+    <div
+      className="flex flex-col"
+      onPaste={(event) => {
+        const files = Array.from(event.clipboardData?.files ?? [])
+        if (files.some((f) => f.type.startsWith('image/'))) {
+          event.preventDefault()
+          void insertImages(files)
+        }
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer?.types.includes('Files')) {
+          event.preventDefault()
+        }
+      }}
+      onDrop={(event) => {
+        const files = Array.from(event.dataTransfer?.files ?? [])
+        if (files.some((f) => f.type.startsWith('image/'))) {
+          event.preventDefault()
+          void insertImages(files)
+        }
+      }}
+    >
       {page.blocks.map((block) => (
         <BlockRow
           key={block.id}
@@ -626,6 +693,31 @@ function BlockEditor({
           />
         </BlockRow>
       ))}
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        aria-label="Upload image"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? [])
+          event.target.value = ''
+          void insertImages(files, imageAfterBlockId.current)
+        }}
+      />
+
+      {imageUpload.isPending ? (
+        <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--workspace-line)] px-3 py-2 text-sm text-[var(--workspace-ink-soft)]">
+          <ImageIcon className="size-4 animate-pulse" />
+          Uploading image…
+        </div>
+      ) : imageUpload.isError ? (
+        <p className="mt-1 text-sm text-[var(--accent-rust)]">
+          {imageUpload.error.message}
+        </p>
+      ) : null}
 
       <AddBlockMenu
         trigger={
@@ -754,6 +846,7 @@ const BASIC_ITEMS: AddMenuItem[] = [
   { label: 'Quote', icon: QuoteIcon, kind: { type: 'quote' } },
   { label: 'Callout', icon: SparklesIcon, kind: { type: 'callout' } },
   { label: 'Divider', icon: MinusIcon, kind: { type: 'divider' } },
+  { label: 'Image', icon: ImageIcon, kind: { type: 'image' } },
 ]
 
 // Each database "view type" creates a database (the storage) opening in that
@@ -832,6 +925,10 @@ function BlockView({
 }) {
   if (block.type === 'divider') {
     return <hr className="my-2 border-[var(--workspace-line)]" />
+  }
+
+  if (block.type === 'image') {
+    return <ImageBlock block={block} />
   }
 
   if (block.type === 'database') {
@@ -926,6 +1023,31 @@ function BlockView({
       onEnter={onEnter}
       className={headingClass}
       placeholder={block.type.startsWith('heading') ? 'Heading' : 'Type here…'}
+    />
+  )
+}
+
+function ImageBlock({ block }: { block: WorkspaceBlock }) {
+  const url = block.content.trim()
+
+  // An image block with no URL yet (e.g. created over MCP without content).
+  if (!url) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--workspace-line)] px-3 py-2 text-sm text-[var(--workspace-ink-soft)]">
+        <ImageIcon className="size-4" />
+        No image yet — delete this block and add the image again.
+      </div>
+    )
+  }
+
+  const fileName = decodeURIComponent(url.split('/').pop() ?? '')
+
+  return (
+    <img
+      src={url}
+      alt={fileName || 'Page image'}
+      loading="lazy"
+      className="my-1 max-h-[36rem] max-w-full rounded-lg border border-[var(--workspace-line)]"
     />
   )
 }

@@ -25,6 +25,7 @@ export const blockTypeSchema = z.enum([
   'quote',
   'callout',
   'divider',
+  'image',
   'database',
 ])
 

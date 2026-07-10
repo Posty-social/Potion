@@ -306,7 +306,8 @@ export const mcpToolDefinitions = [
   },
   {
     name: 'append_block',
-    description: 'Append a block to the end of a page.',
+    description:
+      'Append a block to the end of a page. For image blocks, `content` is the image URL (an /api/assets/… path from an app upload, or any https image URL).',
     annotations: { title: 'Append block' },
     inputSchema: {
       type: 'object',
@@ -323,6 +324,7 @@ export const mcpToolDefinitions = [
             'quote',
             'callout',
             'divider',
+            'image',
             'database',
           ],
         },
