@@ -27,6 +27,11 @@ export type RuntimeEnv = Env & {
   R2_SECRET_ACCESS_KEY?: string
   R2_BUCKET_NAME?: string
   TRUSTED_ORIGINS?: string
+  // Transactional email: Resend when the key is set, else the Cloudflare
+  // Email binding; sender defaults to noreply@APP_DOMAIN.
+  RESEND_API_KEY?: string
+  FROM_EMAIL_ADDRESS?: string
+  SEND_EMAIL?: SendEmail
 }
 
 export function createDb(database: D1Database): AppDatabase {

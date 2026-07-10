@@ -1,5 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2Icon, UploadIcon } from 'lucide-react'
+import {
+  BadgeCheckIcon,
+  Loader2Icon,
+  MailWarningIcon,
+  UploadIcon,
+} from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '#/components/ui/avatar'
@@ -133,9 +138,10 @@ export function AccountSettings() {
         />
       </label>
 
-      <p className="text-sm text-[var(--workspace-ink-soft)]">
-        Signed in as {user.email}
-      </p>
+      <EmailVerification
+        email={user.email}
+        verified={Boolean(user.emailVerified)}
+      />
 
       {error ? (
         <p className="text-sm font-medium text-[var(--accent-rust)]">{error}</p>
@@ -153,6 +159,193 @@ export function AccountSettings() {
           {nameMutation.isPending ? 'Saving…' : 'Save changes'}
         </Button>
       </div>
+
+      <ChangePassword />
     </div>
+  )
+}
+
+/** Verified badge, or a resend button when the email is still unconfirmed. */
+function EmailVerification({
+  email,
+  verified,
+}: {
+  email: string
+  verified: boolean
+}) {
+  const resendMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await authClient.sendVerificationEmail({
+        email,
+        callbackURL: '/settings/account',
+      })
+      if (error) {
+        throw new Error(
+          error.message ?? 'Could not send the verification email.',
+        )
+      }
+    },
+  })
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="flex items-center gap-1.5 text-sm text-[var(--workspace-ink-soft)]">
+        Signed in as {email}
+        {verified ? (
+          <span className="inline-flex items-center gap-1 text-[var(--status-done)]">
+            <BadgeCheckIcon className="size-4" />
+            Verified
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[var(--accent-rust)]">
+            <MailWarningIcon className="size-4" />
+            Not verified
+          </span>
+        )}
+      </p>
+      {!verified ? (
+        resendMutation.isSuccess ? (
+          <p className="text-sm text-[var(--workspace-ink-soft)]">
+            Verification email sent — check your inbox.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={() => resendMutation.mutate()}
+              disabled={resendMutation.isPending}
+            >
+              {resendMutation.isPending
+                ? 'Sending…'
+                : 'Send verification email'}
+            </Button>
+            {resendMutation.error ? (
+              <p className="text-sm font-medium text-[var(--accent-rust)]">
+                {resendMutation.error.message}
+              </p>
+            ) : null}
+          </div>
+        )
+      ) : null}
+    </div>
+  )
+}
+
+/** Set a new password by confirming the current one. */
+function ChangePassword() {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+
+  const changeMutation = useMutation({
+    mutationFn: async () => {
+      if (next !== confirm) {
+        throw new Error('The new passwords do not match.')
+      }
+      const { error } = await authClient.changePassword({
+        currentPassword: current,
+        newPassword: next,
+        revokeOtherSessions: true,
+      })
+      if (error) {
+        throw new Error(
+          error.code === 'INVALID_PASSWORD'
+            ? 'Your current password is incorrect.'
+            : (error.message ?? 'Could not change the password.'),
+        )
+      }
+    },
+    onSuccess: () => {
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+    },
+  })
+
+  return (
+    <form
+      className="flex flex-col gap-3 border-t border-[var(--workspace-line)] pt-5"
+      onSubmit={(event) => {
+        event.preventDefault()
+        changeMutation.mutate()
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-bold">Change password</h2>
+        <p className="text-xs text-[var(--workspace-ink-soft)]">
+          Enter your current password, then the new one (at least 8 characters).
+          Other sessions are signed out.
+        </p>
+      </div>
+
+      <label
+        htmlFor="password-current"
+        className="flex flex-col gap-1.5 text-sm font-medium"
+      >
+        Current password
+        <Input
+          id="password-current"
+          type="password"
+          value={current}
+          onChange={(event) => setCurrent(event.target.value)}
+          autoComplete="current-password"
+          required
+        />
+      </label>
+
+      <label
+        htmlFor="password-new"
+        className="flex flex-col gap-1.5 text-sm font-medium"
+      >
+        New password
+        <Input
+          id="password-new"
+          type="password"
+          value={next}
+          onChange={(event) => setNext(event.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+      </label>
+
+      <label
+        htmlFor="password-confirm"
+        className="flex flex-col gap-1.5 text-sm font-medium"
+      >
+        Confirm new password
+        <Input
+          id="password-confirm"
+          type="password"
+          value={confirm}
+          onChange={(event) => setConfirm(event.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+      </label>
+
+      {changeMutation.error ? (
+        <p className="text-sm font-medium text-[var(--accent-rust)]">
+          {changeMutation.error.message}
+        </p>
+      ) : null}
+      {changeMutation.isSuccess ? (
+        <p className="text-sm font-medium text-[var(--status-done)]">
+          Password updated.
+        </p>
+      ) : null}
+
+      <div className="flex justify-end">
+        <Button
+          type="submit"
+          disabled={changeMutation.isPending || !current || !next || !confirm}
+        >
+          {changeMutation.isPending ? 'Updating…' : 'Update password'}
+        </Button>
+      </div>
+    </form>
   )
 }

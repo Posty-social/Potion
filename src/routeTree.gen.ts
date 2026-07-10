@@ -10,8 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsPropertiesRouteImport } from './routes/settings.properties'
@@ -30,6 +32,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -38,6 +45,11 @@ const McpRoute = McpRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -106,8 +118,10 @@ const ApiRealtimePagesPageIdRoute = ApiRealtimePagesPageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRouteWithChildren
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
@@ -123,8 +137,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
@@ -140,8 +156,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRouteWithChildren
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRoute
@@ -159,8 +177,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/forgot-password'
     | '/login'
     | '/mcp'
+    | '/reset-password'
     | '/settings'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -176,8 +196,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/forgot-password'
     | '/login'
     | '/mcp'
+    | '/reset-password'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
     | '/accept-invitation/$invitationId'
@@ -192,8 +214,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/forgot-password'
     | '/login'
     | '/mcp'
+    | '/reset-password'
     | '/settings'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -210,8 +234,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRoute
@@ -231,6 +257,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -243,6 +276,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -352,8 +392,10 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   McpRoute: McpRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRouteWithChildren,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,

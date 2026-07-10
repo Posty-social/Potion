@@ -19,6 +19,7 @@ jobs:
       R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME || 'potion-assets' }}
       PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET || 'potion-pulumi-state' }}
       ZERO_TRUST_EMAILS: ${{ vars.ZERO_TRUST_EMAILS }}
+      FROM_EMAIL_ADDRESS: ${{ vars.FROM_EMAIL_ADDRESS }}
       GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ vars.GITHUB_CLIENT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,6 +29,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_REGION: auto
@@ -74,6 +76,7 @@ jobs:
           if [ -n "${GOOGLE_CLIENT_SECRET}" ]; then printf "%s" "${GOOGLE_CLIENT_SECRET}" | bun x wrangler secret put GOOGLE_CLIENT_SECRET; fi
           if [ -n "${GITHUB_CLIENT_ID}" ]; then printf "%s" "${GITHUB_CLIENT_ID}" | bun x wrangler secret put GITHUB_CLIENT_ID; fi
           if [ -n "${GITHUB_CLIENT_SECRET}" ]; then printf "%s" "${GITHUB_CLIENT_SECRET}" | bun x wrangler secret put GITHUB_CLIENT_SECRET; fi
+          if [ -n "${RESEND_API_KEY}" ]; then printf "%s" "${RESEND_API_KEY}" | bun x wrangler secret put RESEND_API_KEY; fi
 
       - name: Deploy Worker
         run: bun x wrangler deploy

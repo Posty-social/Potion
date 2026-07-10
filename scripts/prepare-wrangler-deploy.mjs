@@ -141,6 +141,10 @@ config.vars = {
   ...(process.env.R2_BUCKET_NAME
     ? { R2_BUCKET_NAME: process.env.R2_BUCKET_NAME }
     : {}),
+  // Transactional email sender; defaults to noreply@APP_DOMAIN at runtime.
+  ...(process.env.FROM_EMAIL_ADDRESS
+    ? { FROM_EMAIL_ADDRESS: process.env.FROM_EMAIL_ADDRESS }
+    : {}),
 }
 
 const output = JSON.stringify(config, null, 2)

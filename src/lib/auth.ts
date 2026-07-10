@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm'
 import { db, getRuntimeEnv } from '#/lib/db/connection'
 import * as schema from '#/lib/db/schema'
 import { member } from '#/lib/db/schema'
+import { authEmail, sendEmail } from '#/lib/email/send.server'
 import {
   ensurePersonalWorkspace,
   hasPendingInvitation,
@@ -69,6 +70,34 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmail({
+        to: user.email,
+        subject: 'Reset your Potion password',
+        ...authEmail({
+          heading: 'Reset your password',
+          body: `Someone (hopefully you) asked to reset the password for ${user.email}. The link expires in one hour.`,
+          actionLabel: 'Reset password',
+          actionUrl: url,
+        }),
+      })
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendEmail({
+        to: user.email,
+        subject: 'Verify your email for Potion',
+        ...authEmail({
+          heading: 'Verify your email',
+          body: `Confirm ${user.email} to finish setting up your Potion account.`,
+          actionLabel: 'Verify email',
+          actionUrl: url,
+        }),
+      })
+    },
   },
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days

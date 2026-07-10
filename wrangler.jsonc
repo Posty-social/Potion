@@ -55,6 +55,13 @@
       },
     ],
   },
+  // Cloudflare Email fallback for transactional email (used when
+  // RESEND_API_KEY is not configured). Requires Email Routing on the zone.
+  "send_email": [
+    {
+      "name": "SEND_EMAIL",
+    },
+  ],
   "migrations": [
     {
       "tag": "v1",

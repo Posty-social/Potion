@@ -1,5 +1,5 @@
 import { useForm } from '@tanstack/react-form'
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { useState } from 'react'
 import { z } from 'zod'
 
@@ -30,6 +30,28 @@ export const Route = createFileRoute('/login')({
 
 type Mode = 'signin' | 'signup'
 
+/** Turn Better Auth error codes into copy a person can act on. */
+function friendlyAuthError(error: {
+  code?: string
+  message?: string
+  status?: number
+}): string {
+  switch (error.code) {
+    case 'INVALID_EMAIL_OR_PASSWORD':
+    case 'INVALID_PASSWORD':
+    case 'USER_NOT_FOUND':
+      return 'Incorrect email or password.'
+    case 'USER_ALREADY_EXISTS':
+      return 'An account with that email already exists — sign in instead.'
+    case 'EMAIL_NOT_VERIFIED':
+      return 'Verify your email before signing in — check your inbox for the link.'
+    case 'PASSWORD_TOO_SHORT':
+      return 'Passwords need at least 8 characters.'
+    default:
+      return error.message ?? 'Something went wrong. Try again.'
+  }
+}
+
 function LoginRoute() {
   const { redirect: redirectTo } = Route.useSearch()
   const { providers } = Route.useLoaderData()
@@ -56,7 +78,7 @@ function LoginRoute() {
       if (result.error) {
         formApi.setErrorMap({
           onSubmit: {
-            form: result.error.message ?? 'Something went wrong. Try again.',
+            form: friendlyAuthError(result.error),
             fields: {},
           },
         })
@@ -164,6 +186,17 @@ function LoginRoute() {
               </label>
             )}
           </form.Field>
+
+          {mode === 'signin' ? (
+            <div className="-mt-1 flex justify-end">
+              <Link
+                to="/forgot-password"
+                className="text-xs font-medium text-[var(--accent-plum)] no-underline underline-offset-2 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+          ) : null}
 
           <form.Subscribe
             selector={(state) =>
