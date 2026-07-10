@@ -355,7 +355,11 @@ function PageTreeNode({
 }) {
   const children = childrenByParent.get(page.id) ?? []
   const hasChildren = children.length > 0
-  const [expanded, setExpanded] = useState(true)
+  // Collapsed by default; start open only when this subtree holds the page
+  // being viewed, so the active page is always revealed on load.
+  const [expanded, setExpanded] = useState(() =>
+    subtreeContainsSlug(childrenByParent, page.id, activeSlug),
+  )
 
   return (
     <div>
@@ -416,6 +420,19 @@ function PageTreeNode({
         />
       ) : null}
     </div>
+  )
+}
+
+function subtreeContainsSlug(
+  childrenByParent: Map<string | null, WorkspacePageSummary[]>,
+  pageId: string,
+  slug: string,
+): boolean {
+  const children = childrenByParent.get(pageId) ?? []
+  return children.some(
+    (child) =>
+      child.slug === slug ||
+      subtreeContainsSlug(childrenByParent, child.id, slug),
   )
 }
 
