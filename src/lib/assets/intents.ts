@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const maxImageUploadBytes = 10 * 1024 * 1024
-export const maxVideoUploadBytes = 50 * 1024 * 1024
+export const maxVideoUploadBytes = 250 * 1024 * 1024
 
 /**
  * Upload size limit for an asset MIME type, or null when the type isn't
