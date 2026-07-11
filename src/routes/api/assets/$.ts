@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 
-import { presignAssetGet } from '#/lib/assets/functions'
 import {
   assetUploadLimit,
   buildR2AssetKey,
   missingR2SigningVariables,
 } from '#/lib/assets/intents'
+import { presignAssetGet } from '#/lib/assets/r2.server'
 import { getRuntimeEnv } from '#/lib/db/connection'
 import { hasWorkspaceAccess } from '#/lib/workspace/access'
 import { resolveWorkspaceAccess } from '#/lib/workspace/access.server'

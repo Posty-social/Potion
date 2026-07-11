@@ -1,45 +1,16 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
-import { AwsClient } from 'aws4fetch'
 
-import { getRuntimeEnv } from '#/lib/db/connection'
 import { requireWorkspaceAccess } from '#/lib/workspace/access'
 import { resolveWorkspaceAccess } from '#/lib/workspace/access.server'
 
-import {
-  assetUploadIntentSchema,
-  buildR2AssetKey,
-  missingR2SigningVariables,
-} from './intents'
+import { assetUploadIntentSchema, buildR2AssetKey } from './intents'
+import { r2Signer } from './r2.server'
 
 // A minted upload URL is single-purpose: PUT only, one server-chosen key,
 // signed content-type AND content-length (the uploaded bytes must match the
 // validated intent or R2 rejects the signature), and a short lifetime.
 const PUT_URL_EXPIRY_SECONDS = 300
-
-function r2Signer() {
-  const env = getRuntimeEnv()
-  const accountId = env.CLOUDFLARE_ACCOUNT_ID
-  const bucketName = env.R2_BUCKET_NAME
-  const accessKeyId = env.R2_ACCESS_KEY_ID
-  const secretAccessKey = env.R2_SECRET_ACCESS_KEY
-
-  if (!accountId || !bucketName || !accessKeyId || !secretAccessKey) {
-    return { aws: null, missing: missingR2SigningVariables(env) }
-  }
-
-  return {
-    aws: new AwsClient({
-      accessKeyId,
-      secretAccessKey,
-      service: 's3',
-      region: 'auto',
-    }),
-    missing: [] as string[],
-    objectUrl: (key: string, expirySeconds: number) =>
-      `https://${accountId}.r2.cloudflarestorage.com/${bucketName}/${key}?X-Amz-Expires=${expirySeconds}`,
-  }
-}
 
 /**
  * Mint a presigned R2 PUT for a page-media upload. Auth-gated to workspace
@@ -94,26 +65,3 @@ export const createAssetUploadIntent = createServerFn({ method: 'POST' })
       headers,
     }
   })
-
-/**
- * Presign a GET for an asset key, for the serving route's redirect. Not a
- * server function — only callable from server code that has already
- * authenticated the requester.
- */
-export async function presignAssetGet(
-  key: string,
-  expirySeconds: number,
-): Promise<string | null> {
-  const signer = r2Signer()
-
-  if (!signer.aws) {
-    return null
-  }
-
-  const request = await signer.aws.sign(signer.objectUrl(key, expirySeconds), {
-    method: 'GET',
-    aws: { signQuery: true, service: 's3', region: 'auto' },
-  })
-
-  return request.url
-}
