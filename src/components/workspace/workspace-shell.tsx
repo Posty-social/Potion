@@ -47,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { Input } from '#/components/ui/input'
+import { Toaster, toast, updateToast } from '#/components/ui/toaster'
 import { createAssetUploadIntent } from '#/lib/assets/functions'
 import { authClient } from '#/lib/auth-client'
 import { cn } from '#/lib/utils'
@@ -77,39 +78,100 @@ type WorkspaceShellProps = {
 }
 
 /**
+ * Send a file with upload-progress callbacks. XHR rather than fetch because
+ * fetch has no upload progress events.
+ */
+function sendWithProgress(options: {
+  url: string
+  method: 'PUT' | 'POST'
+  headers: Record<string, string>
+  file: File
+  onProgress?: (fraction: number) => void
+}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(options.method, options.url)
+    for (const [name, value] of Object.entries(options.headers)) {
+      xhr.setRequestHeader(name, value)
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        options.onProgress?.(event.loaded / event.total)
+      }
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.responseText)
+      } else {
+        reject(new Error('Could not upload the file.'))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Could not upload the file.'))
+    xhr.send(options.file)
+  })
+}
+
+/**
  * Upload an image/video and return the stable app URL to store as block
  * content. The server mints a presigned R2 PUT (auth-gated, key/type/size
  * all signed) and the browser uploads straight to R2; when signing
  * credentials are absent (local dev) it falls back to uploading through
  * the app.
  */
-async function uploadAsset(file: File): Promise<string> {
+async function uploadAsset(
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<string> {
   const intent = await createAssetUploadIntent({
     data: { fileName: file.name, mime: file.type, sizeBytes: file.size },
   })
 
   if (intent.configured) {
-    const response = await fetch(intent.uploadUrl, {
+    await sendWithProgress({
+      url: intent.uploadUrl,
       method: 'PUT',
       headers: intent.headers,
-      body: file,
+      file,
+      onProgress,
     })
-    if (!response.ok) {
-      throw new Error('Could not upload the file.')
-    }
     return intent.servePath
   }
 
-  const response = await fetch('/api/assets/upload', {
+  const body = await sendWithProgress({
+    url: '/api/assets/upload',
     method: 'POST',
     headers: { 'content-type': file.type, 'x-file-name': file.name },
-    body: file,
+    file,
+    onProgress,
   })
-  if (!response.ok) {
-    throw new Error('Could not upload the file.')
-  }
-  const { url } = (await response.json()) as { url: string }
+  const { url } = JSON.parse(body) as { url: string }
   return url
+}
+
+/** Upload with a progress toast that resolves to success or error in place. */
+async function uploadAssetWithFeedback(file: File): Promise<string> {
+  const toastId = toast({ title: `Uploading ${file.name}…`, progress: 0 })
+
+  try {
+    const url = await uploadAsset(file, (fraction) =>
+      updateToast(toastId, { progress: fraction }),
+    )
+    updateToast(toastId, {
+      title: `Uploaded ${file.name}`,
+      progress: null,
+      duration: 2500,
+    })
+    return url
+  } catch (error) {
+    updateToast(toastId, {
+      title: 'Upload failed',
+      description: error instanceof Error ? error.message : String(error),
+      variant: 'error',
+      progress: null,
+      duration: 6000,
+    })
+    throw error
+  }
 }
 
 function mediaBlockType(file: File): 'image' | 'video' | null {
@@ -149,6 +211,7 @@ export function WorkspaceShell({ page, pages }: WorkspaceShellProps) {
 
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <Toaster />
       <CommandMenu onNewPage={() => void createTopLevelPage()} />
       <Sidebar
         pages={pages}
@@ -635,7 +698,7 @@ function BlockEditor({
   // YouTube/Vimeo/file link, since videos are as often embedded as uploaded.
   const mediaInputRef = useRef<HTMLInputElement>(null)
   const mediaAfterBlockId = useRef<string | undefined>(undefined)
-  const mediaUpload = useMutation({ mutationFn: uploadAsset })
+  const mediaUpload = useMutation({ mutationFn: uploadAssetWithFeedback })
 
   const insertMedia = async (files: File[], afterBlockId?: string) => {
     let cursor = afterBlockId
@@ -644,7 +707,12 @@ function BlockEditor({
       if (!type) {
         continue
       }
-      const url = await mediaUpload.mutateAsync(file)
+      let url: string
+      try {
+        url = await mediaUpload.mutateAsync(file)
+      } catch {
+        continue // failure already surfaced as an error toast
+      }
       const { blockId } = await mutations.createBlock({
         pageId: page.id,
         type,
@@ -749,17 +817,6 @@ function BlockEditor({
           void insertMedia(files, mediaAfterBlockId.current)
         }}
       />
-
-      {mediaUpload.isPending ? (
-        <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--workspace-line)] px-3 py-2 text-sm text-[var(--workspace-ink-soft)]">
-          <UploadIcon className="size-4 animate-pulse" />
-          Uploading…
-        </div>
-      ) : mediaUpload.isError ? (
-        <p className="mt-1 text-sm text-[var(--accent-rust)]">
-          {mediaUpload.error.message}
-        </p>
-      ) : null}
 
       <AddBlockMenu
         trigger={
@@ -1213,7 +1270,7 @@ function MediaPlaceholder({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [link, setLink] = useState('')
-  const upload = useMutation({ mutationFn: uploadAsset })
+  const upload = useMutation({ mutationFn: uploadAssetWithFeedback })
 
   const submitLink = () => {
     const value = link.trim()
@@ -1238,7 +1295,7 @@ function MediaPlaceholder({
               .mutateAsync(file)
               .then(onReady)
               .catch(() => {
-                // Surfaced via upload.isError below.
+                // Failure already surfaced as an error toast.
               })
           }
         }}
@@ -1271,11 +1328,6 @@ function MediaPlaceholder({
           className="h-8 w-64"
         />
       </div>
-      {upload.isError ? (
-        <p className="text-sm text-[var(--accent-rust)]">
-          {upload.error.message}
-        </p>
-      ) : null}
     </div>
   )
 }
