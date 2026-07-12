@@ -2112,7 +2112,13 @@ function BoardColumn({
   )
 }
 
-function OptionChips({
+/**
+ * The non-title properties shown on a card (board / list / gallery). Which
+ * properties appear is controlled by the view's `visiblePropertyIds` (the
+ * "Properties" toolbar menu) — this renders a compact value for each type,
+ * skipping empties so a card only shows what's set.
+ */
+function CardProperties({
   properties,
   row,
   excludeIds = [],
@@ -2121,26 +2127,140 @@ function OptionChips({
   row: DatabaseRow
   excludeIds?: string[]
 }) {
-  const chips = properties.filter(
-    (p) =>
-      !excludeIds.includes(p.id) &&
-      (p.type === 'select' || p.type === 'status' || p.type === 'multi_select'),
+  const shown = properties.filter(
+    (p) => !excludeIds.includes(p.id) && p.type !== 'title',
   )
 
+  if (shown.length === 0) {
+    return null
+  }
+
   return (
-    <div className="flex flex-wrap gap-1">
-      {chips.map((property) => {
-        const value = row.values[property.id]
-        if (property.type === 'multi_select' && Array.isArray(value)) {
-          return value.map((id) => {
-            const option = optionById(property, id)
-            return option ? <OptionChip key={id} option={option} /> : null
-          })
-        }
-        const option = optionById(property, value)
-        return option ? <OptionChip key={property.id} option={option} /> : null
-      })}
+    <div className="flex flex-wrap items-center gap-1">
+      {shown.map((property) => (
+        <CardValue key={property.id} property={property} row={row} />
+      ))}
     </div>
+  )
+}
+
+/** A neutral (non-option) property value pill. */
+function CardPill({
+  children,
+  title,
+}: {
+  children: ReactNode
+  title?: string
+}) {
+  return (
+    <span
+      title={title}
+      className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-[var(--workspace-muted)] px-2 py-0.5 text-xs font-medium text-[var(--workspace-ink-soft)]"
+    >
+      {children}
+    </span>
+  )
+}
+
+/** Compact, read-only render of one property's value for a card. */
+function CardValue({
+  property,
+  row,
+}: {
+  property: DatabaseProperty
+  row: DatabaseRow
+}) {
+  const value = row.values[property.id]
+
+  if (property.type === 'select' || property.type === 'status') {
+    const option = optionById(property, value)
+    return option ? <OptionChip option={option} /> : null
+  }
+
+  if (property.type === 'multi_select') {
+    if (!Array.isArray(value) || value.length === 0) {
+      return null
+    }
+    return (
+      <>
+        {value.map((id) => {
+          const option = optionById(property, id)
+          return option ? <OptionChip key={id} option={option} /> : null
+        })}
+      </>
+    )
+  }
+
+  if (property.type === 'person') {
+    const ids = Array.isArray(value)
+      ? value.map(String)
+      : typeof value === 'string' && value
+        ? [value]
+        : []
+    return ids.length > 0 ? <CardPersonChips ids={ids} /> : null
+  }
+
+  if (property.type === 'checkbox') {
+    return value === true ? (
+      <CardPill>
+        <SquareCheckIcon className="size-3" />
+        {property.name}
+      </CardPill>
+    ) : null
+  }
+
+  if (property.type === 'date') {
+    if (typeof value !== 'string' || !value.trim()) {
+      return null
+    }
+    const parsed = new Date(value)
+    const label = Number.isNaN(parsed.getTime())
+      ? value
+      : parsed.toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+    return <CardPill title={value}>{label}</CardPill>
+  }
+
+  if (property.type === 'number') {
+    return typeof value === 'number' ? (
+      <CardPill>{String(value)}</CardPill>
+    ) : null
+  }
+
+  // text / url / email / phone / created_time / last_edited_time
+  return typeof value === 'string' && value.trim() ? (
+    <CardPill title={value}>{value}</CardPill>
+  ) : null
+}
+
+/** Person-property values rendered as small avatar + name pills. */
+function CardPersonChips({ ids }: { ids: string[] }) {
+  const { data: members } = useQuery(workspaceMembersQuery())
+
+  return (
+    <>
+      {ids.map((id) => {
+        const member = members?.find((candidate) => candidate.userId === id)
+        const label = member?.name || member?.email || id
+        return (
+          <span
+            key={id}
+            className="inline-flex items-center gap-1 rounded-full bg-[var(--workspace-muted)] py-0.5 pr-2 pl-0.5 text-xs font-medium text-[var(--workspace-ink-soft)]"
+          >
+            <Avatar className="size-4">
+              <AvatarImage src={`/api/users/${id}/avatar`} alt={label} />
+              <AvatarFallback className="text-[8px]">
+                {initialsFor(member?.name ?? id, member?.email ?? id)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="max-w-[8rem] truncate">{label}</span>
+          </span>
+        )
+      })}
+    </>
   )
 }
 
@@ -2187,7 +2307,7 @@ function BoardCard({
           <Trash2Icon className="size-3.5" />
         </button>
       </div>
-      <OptionChips
+      <CardProperties
         properties={properties}
         row={row}
         excludeIds={[database.titlePropertyId, groupPropertyId]}
@@ -2221,7 +2341,7 @@ function ListView({
             >
               {typeof title === 'string' && title ? title : 'Untitled'}
             </button>
-            <OptionChips
+            <CardProperties
               properties={properties}
               row={row}
               excludeIds={[database.titlePropertyId]}
@@ -2273,7 +2393,7 @@ function GalleryView({
             <span className="truncate text-sm font-semibold">
               {typeof title === 'string' && title ? title : 'Untitled'}
             </span>
-            <OptionChips
+            <CardProperties
               properties={properties}
               row={row}
               excludeIds={[database.titlePropertyId]}
