@@ -118,6 +118,9 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
     async updateRow() {
       return { ok: true as const }
     },
+    async updateRowBody() {
+      return { ok: true as const }
+    },
     async deleteRow() {
       return { ok: true as const }
     },
@@ -444,6 +447,7 @@ describe('MCP workspace tools', () => {
         'delete_block',
         'add_row',
         'update_row',
+        'update_row_body',
         'delete_row',
         'add_database_property',
         'update_database_property',

@@ -27,6 +27,7 @@ import {
   updateBlockSchema,
   updatePagePropertySchema,
   updatePropertySchema,
+  updateRowBodySchema,
   updateRowSchema,
 } from '#/lib/workspace/schemas'
 
@@ -47,6 +48,7 @@ export type McpRepository = Pick<
   | 'deleteBlock'
   | 'addRow'
   | 'updateRow'
+  | 'updateRowBody'
   | 'deleteRow'
   | 'addProperty'
   | 'updateProperty'
@@ -77,6 +79,7 @@ const mcpToolNames = [
   'delete_block',
   'add_row',
   'update_row',
+  'update_row_body',
   'delete_row',
   'add_database_property',
   'update_database_property',
@@ -413,6 +416,22 @@ export const mcpToolDefinitions = [
         ...workspaceIdProperty,
       },
       required: ['rowId', 'values'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_row_body',
+    description:
+      "Set a database row's page body — the Markdown content shown in the side panel when the row (card) is opened. Replaces the existing body.",
+    annotations: { title: 'Update row body', idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rowId: { type: 'string' },
+        body: { type: 'string', maxLength: 100_000 },
+        ...workspaceIdProperty,
+      },
+      required: ['rowId', 'body'],
       additionalProperties: false,
     },
   },
@@ -991,6 +1010,13 @@ export async function callMcpTool(
   if (tool === 'update_row') {
     const data = updateRowSchema.parse(rest ?? {})
     const result = await repository.updateRow(data)
+
+    return toolResult(result)
+  }
+
+  if (tool === 'update_row_body') {
+    const data = updateRowBodySchema.parse(rest ?? {})
+    const result = await repository.updateRowBody(data)
 
     return toolResult(result)
   }
