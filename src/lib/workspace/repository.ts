@@ -70,7 +70,6 @@ export type WorkspaceNotifier = {
 }
 
 export type WorkspaceBlockUpdate = {
-  ok: true
   pageId: string
   blockId: string
   content: string
@@ -492,10 +491,7 @@ export class WorkspaceRepository {
     return { ...toPageSummary(page), title, updatedAt: now.toISOString() }
   }
 
-  async setPageIcon(input: {
-    pageId: string
-    icon: string
-  }): Promise<{ ok: true }> {
+  async setPageIcon(input: { pageId: string; icon: string }): Promise<void> {
     const page = await this.assertPageInOrg(input.pageId)
 
     await this.db
@@ -504,15 +500,15 @@ export class WorkspaceRepository {
       .where(eq(pageTable.id, page.id))
     await this.notifyPage(page.id)
 
-    return { ok: true }
+    return
   }
 
-  async deletePage(input: { pageId: string }): Promise<{ ok: true }> {
+  async deletePage(input: { pageId: string }): Promise<void> {
     const page = await this.assertPageInOrg(input.pageId)
     await this.db.delete(pageTable).where(eq(pageTable.id, page.id))
     await this.notifyPage(page.id)
 
-    return { ok: true }
+    return
   }
 
   // --- Page properties ---------------------------------------------------
@@ -580,7 +576,7 @@ export class WorkspaceRepository {
   async attachPageProperty(input: {
     pageId: string
     propertyId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const page = await this.assertPageInOrg(input.pageId)
     await this.getCatalogProperty(input.propertyId)
 
@@ -589,7 +585,7 @@ export class WorkspaceRepository {
       await this.writeAttachedIds(page.id, [...ids, input.propertyId])
     }
 
-    return { ok: true }
+    return
   }
 
   async updatePageProperty(input: {
@@ -597,12 +593,12 @@ export class WorkspaceRepository {
     propertyId: string
     name?: string
     type?: Exclude<PropertyType, 'title'>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     await this.assertPageInOrg(input.pageId)
     await this.updateCatalogProperty(input)
     await this.notifyPage(input.pageId)
 
-    return { ok: true }
+    return
   }
 
   /** Rename/retype a shared property — changes it on every page using it. */
@@ -610,7 +606,7 @@ export class WorkspaceRepository {
     propertyId: string
     name?: string
     type?: Exclude<PropertyType, 'title'>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const row = await this.getCatalogProperty(input.propertyId)
 
     const patch: Partial<typeof workspacePropertyTable.$inferInsert> = {
@@ -636,16 +632,14 @@ export class WorkspaceRepository {
         ),
       )
 
-    return { ok: true }
+    return
   }
 
   /**
    * Delete a shared property everywhere: remove it from the catalog, detach it
    * from every page that uses it, and drop those pages' stored values.
    */
-  async deleteCatalogProperty(input: {
-    propertyId: string
-  }): Promise<{ ok: true }> {
+  async deleteCatalogProperty(input: { propertyId: string }): Promise<void> {
     await this.getCatalogProperty(input.propertyId)
 
     await this.db
@@ -687,13 +681,13 @@ export class WorkspaceRepository {
     )
     await Promise.all(affected.map((page) => this.notifyPage(page.id)))
 
-    return { ok: true }
+    return
   }
 
   async deletePageProperty(input: {
     pageId: string
     propertyId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     // Detach from this page only — the shared definition stays in the catalog
     // for any other page that uses it.
     const page = await this.assertPageInOrg(input.pageId)
@@ -714,14 +708,14 @@ export class WorkspaceRepository {
       .where(eq(pageTable.id, page.id))
     await this.notifyPage(page.id)
 
-    return { ok: true }
+    return
   }
 
   async setPagePropertyValue(input: {
     pageId: string
     propertyId: string
     value: CellValue
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const page = await this.assertPageInOrg(input.pageId)
     const values = {
       ...((page.propertyValues ?? {}) as Record<string, CellValue>),
@@ -738,7 +732,7 @@ export class WorkspaceRepository {
       .where(eq(pageTable.id, page.id))
     await this.notifyPage(page.id)
 
-    return { ok: true }
+    return
   }
 
   async addPagePropertyOption(input: {
@@ -786,11 +780,11 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
     name: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     await this.renameCatalogPropertyOption(input)
     await this.notifyPage(input.pageId)
 
-    return { ok: true }
+    return
   }
 
   /** Rename a shared select option (shared everywhere it's used). */
@@ -798,7 +792,7 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
     name: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const row = await this.getCatalogProperty(input.propertyId)
     const options = (row.options ?? []).map((option) =>
       option.id === input.optionId
@@ -815,28 +809,28 @@ export class WorkspaceRepository {
 
     await this.writeCatalogOptions(input.propertyId, options)
 
-    return { ok: true }
+    return
   }
 
   /** Delete a shared select option (removed everywhere it's used). */
   async deleteCatalogPropertyOption(input: {
     propertyId: string
     optionId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const row = await this.getCatalogProperty(input.propertyId)
     await this.writeCatalogOptions(
       input.propertyId,
       (row.options ?? []).filter((option) => option.id !== input.optionId),
     )
 
-    return { ok: true }
+    return
   }
 
   async deletePagePropertyOption(input: {
     pageId: string
     propertyId: string
     optionId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     await this.deleteCatalogPropertyOption(input)
 
     // Clear the removed option from this page's value.
@@ -861,7 +855,7 @@ export class WorkspaceRepository {
       .where(eq(pageTable.id, page.id))
     await this.notifyPage(page.id)
 
-    return { ok: true }
+    return
   }
 
   /** Load one catalog property, scoped to this workspace. */
@@ -1074,7 +1068,6 @@ export class WorkspaceRepository {
     await this.touchPage(page.id)
 
     return {
-      ok: true,
       pageId: page.id,
       blockId: block.id,
       content: input.content,
@@ -1085,7 +1078,7 @@ export class WorkspaceRepository {
   async setBlockChecked(input: {
     blockId: string
     checked: boolean
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const block = await this.assertBlockInOrg(input.blockId)
     const properties = (block.properties ?? {}) as BlockProperties
 
@@ -1098,10 +1091,10 @@ export class WorkspaceRepository {
       .where(eq(blockTable.id, block.id))
     await this.notifyPage(block.pageId)
 
-    return { ok: true }
+    return
   }
 
-  async deleteBlock(input: { blockId: string }): Promise<{ ok: true }> {
+  async deleteBlock(input: { blockId: string }): Promise<void> {
     const block = await this.assertBlockInOrg(input.blockId)
 
     if (block.type === 'database' && block.collectionId) {
@@ -1115,7 +1108,7 @@ export class WorkspaceRepository {
 
     await this.touchPage(block.pageId)
 
-    return { ok: true }
+    return
   }
 
   // --- Database ----------------------------------------------------------
@@ -1123,7 +1116,7 @@ export class WorkspaceRepository {
   async renameDatabase(input: {
     databaseId: string
     title: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const database = await this.assertDatabaseInOrg(input.databaseId)
 
     await this.db
@@ -1132,7 +1125,7 @@ export class WorkspaceRepository {
       .where(eq(collectionTable.id, database.id))
     await this.notifyPage(database.pageId)
 
-    return { ok: true }
+    return
   }
 
   // --- Views -------------------------------------------------------------
@@ -1172,7 +1165,7 @@ export class WorkspaceRepository {
   async setViewType(input: {
     viewId: string
     type: DatabaseViewType
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const view = await this.assertViewInOrg(input.viewId)
     const database = await this.assertDatabaseInOrg(view.collectionId)
     const properties = (database.schema ?? []) as DatabaseProperty[]
@@ -1191,13 +1184,13 @@ export class WorkspaceRepository {
       .where(eq(collectionViewTable.id, view.id))
     await this.notifyPage(database.pageId)
 
-    return { ok: true }
+    return
   }
 
   async setViewDateProperty(input: {
     viewId: string
     datePropertyId: string | null
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     return this.patchViewConfig(input.viewId, {
       datePropertyId: input.datePropertyId ?? undefined,
     })
@@ -1206,7 +1199,7 @@ export class WorkspaceRepository {
   async setViewSorts(input: {
     viewId: string
     sorts: Array<{ propertyId: string; direction: 'asc' | 'desc' }>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     return this.patchViewConfig(input.viewId, {
       sorts: input.sorts.map((sort) => ({
         fieldId: sort.propertyId,
@@ -1218,7 +1211,7 @@ export class WorkspaceRepository {
   async setViewFilters(input: {
     viewId: string
     filters: Array<{ propertyId: string; value: string }>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     return this.patchViewConfig(input.viewId, {
       filters: input.filters as unknown as JsonRecord[],
     })
@@ -1227,7 +1220,7 @@ export class WorkspaceRepository {
   async setViewProperties(input: {
     viewId: string
     visiblePropertyIds: string[] | null
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     return this.patchViewConfig(input.viewId, {
       visibleFieldIds: input.visiblePropertyIds ?? undefined,
     })
@@ -1236,7 +1229,7 @@ export class WorkspaceRepository {
   private async patchViewConfig(
     viewId: string,
     patch: Partial<CollectionViewConfig>,
-  ): Promise<{ ok: true }> {
+  ): Promise<void> {
     const view = await this.assertViewInOrg(viewId)
     const config = (view.config ?? {}) as CollectionViewConfig
 
@@ -1246,13 +1239,10 @@ export class WorkspaceRepository {
       .where(eq(collectionViewTable.id, view.id))
     await this.notifyDatabase(view.collectionId)
 
-    return { ok: true }
+    return
   }
 
-  async renameView(input: {
-    viewId: string
-    name: string
-  }): Promise<{ ok: true }> {
+  async renameView(input: { viewId: string; name: string }): Promise<void> {
     const view = await this.assertViewInOrg(input.viewId)
 
     await this.db
@@ -1261,10 +1251,10 @@ export class WorkspaceRepository {
       .where(eq(collectionViewTable.id, view.id))
     await this.notifyDatabase(view.collectionId)
 
-    return { ok: true }
+    return
   }
 
-  async deleteView(input: { viewId: string }): Promise<{ ok: true }> {
+  async deleteView(input: { viewId: string }): Promise<void> {
     const view = await this.assertViewInOrg(input.viewId)
     const remaining = await this.db
       .select({ id: collectionViewTable.id })
@@ -1283,13 +1273,13 @@ export class WorkspaceRepository {
       .where(eq(collectionViewTable.id, view.id))
     await this.notifyDatabase(view.collectionId)
 
-    return { ok: true }
+    return
   }
 
   async setViewGroupBy(input: {
     viewId: string
     groupByPropertyId: string | null
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const view = await this.assertViewInOrg(input.viewId)
     const config = (view.config ?? {}) as CollectionViewConfig
 
@@ -1305,7 +1295,7 @@ export class WorkspaceRepository {
       .where(eq(collectionViewTable.id, view.id))
     await this.notifyDatabase(view.collectionId)
 
-    return { ok: true }
+    return
   }
 
   // --- Properties --------------------------------------------------------
@@ -1336,7 +1326,7 @@ export class WorkspaceRepository {
     propertyId: string
     name?: string
     type?: Exclude<PropertyType, 'title'>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const properties = await this.readProperties(input.databaseId)
     const property = properties.find((p) => p.id === input.propertyId)
 
@@ -1367,13 +1357,13 @@ export class WorkspaceRepository {
 
     await this.writeProperties(input.databaseId, properties)
 
-    return { ok: true }
+    return
   }
 
   async deleteProperty(input: {
     databaseId: string
     propertyId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const properties = await this.readProperties(input.databaseId)
     const property = properties.find((p) => p.id === input.propertyId)
 
@@ -1390,7 +1380,7 @@ export class WorkspaceRepository {
     )
     await this.stripValueFromRows(input.databaseId, input.propertyId)
 
-    return { ok: true }
+    return
   }
 
   async addPropertyOption(input: {
@@ -1426,7 +1416,7 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
     name: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const properties = await this.readProperties(input.databaseId)
     const option = properties
       .find((p) => p.id === input.propertyId)
@@ -1442,14 +1432,14 @@ export class WorkspaceRepository {
     option.name = input.name.trim() || 'Option'
     await this.writeProperties(input.databaseId, properties)
 
-    return { ok: true }
+    return
   }
 
   async deletePropertyOption(input: {
     databaseId: string
     propertyId: string
     optionId: string
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const properties = await this.readProperties(input.databaseId)
     const property = properties.find((p) => p.id === input.propertyId)
 
@@ -1494,7 +1484,7 @@ export class WorkspaceRepository {
       }),
     )
 
-    return { ok: true }
+    return
   }
 
   // --- Rows --------------------------------------------------------------
@@ -1533,7 +1523,7 @@ export class WorkspaceRepository {
   async updateRow(input: {
     rowId: string
     values: Record<string, CellValue>
-  }): Promise<{ ok: true }> {
+  }): Promise<void> {
     const row = await this.assertRowInOrg(input.rowId)
     const merged = {
       ...((row.values ?? {}) as Record<string, CellValue>),
@@ -1550,13 +1540,10 @@ export class WorkspaceRepository {
       .where(eq(collectionRowTable.id, row.id))
     await this.notifyDatabase(row.collectionId)
 
-    return { ok: true }
+    return
   }
 
-  async updateRowBody(input: {
-    rowId: string
-    body: string
-  }): Promise<{ ok: true }> {
+  async updateRowBody(input: { rowId: string; body: string }): Promise<void> {
     const row = await this.assertRowInOrg(input.rowId)
     const body = input.body.trim() ? input.body : null
 
@@ -1570,17 +1557,17 @@ export class WorkspaceRepository {
       .where(eq(collectionRowTable.id, row.id))
     await this.notifyDatabase(row.collectionId)
 
-    return { ok: true }
+    return
   }
 
-  async deleteRow(input: { rowId: string }): Promise<{ ok: true }> {
+  async deleteRow(input: { rowId: string }): Promise<void> {
     const row = await this.assertRowInOrg(input.rowId)
     await this.db
       .delete(collectionRowTable)
       .where(eq(collectionRowTable.id, row.id))
     await this.notifyDatabase(row.collectionId)
 
-    return { ok: true }
+    return
   }
 
   // --- Import / seed -----------------------------------------------------

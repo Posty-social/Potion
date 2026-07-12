@@ -1173,7 +1173,12 @@ async function toHttpResult(
   }
 }
 
-function toolResult(structuredContent: unknown): McpToolResult {
+function toolResult(structuredContent?: unknown): McpToolResult {
+  // Mutations that have nothing useful to return resolve to an empty result
+  // (no content, no structuredContent) rather than a filler { ok: true }.
+  if (structuredContent === undefined) {
+    return { content: [], structuredContent: undefined }
+  }
   return {
     content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
     structuredContent,

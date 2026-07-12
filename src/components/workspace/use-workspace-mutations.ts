@@ -175,7 +175,7 @@ export function useWorkspaceMutations() {
           )
         }
         sync(attachWorkspacePageProperty({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       updatePageProperty: (input: {
         pageId: string
@@ -196,7 +196,7 @@ export function useWorkspaceMutations() {
             : {}),
         }))
         sync(updateWorkspacePageProperty({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       deletePageProperty: (input: { pageId: string; propertyId: string }) => {
         patchPage(input.pageId, (page) => {
@@ -211,7 +211,7 @@ export function useWorkspaceMutations() {
           }
         })
         sync(deleteWorkspacePageProperty({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       setPagePropertyValue: (input: {
         pageId: string
@@ -226,7 +226,7 @@ export function useWorkspaceMutations() {
           },
         }))
         sync(setWorkspacePagePropertyValue({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       addPagePropertyOption: (input: {
         pageId: string
@@ -269,7 +269,7 @@ export function useWorkspaceMutations() {
           ),
         }))
         sync(renameWorkspacePagePropertyOption({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       deletePagePropertyOption: (input: {
         pageId: string
@@ -299,7 +299,7 @@ export function useWorkspaceMutations() {
           }
         })
         sync(deleteWorkspacePagePropertyOption({ data: input }))
-        return Promise.resolve({ ok: true as const })
+        return Promise.resolve()
       },
       // Blocks
       createBlock: (input: {

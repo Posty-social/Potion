@@ -68,7 +68,7 @@ export const Route = createFileRoute('/api/users/$userId/avatar')({
           httpMetadata: { contentType },
         })
 
-        return Response.json({ ok: true })
+        return new Response(null, { status: 204 })
       },
     },
   },

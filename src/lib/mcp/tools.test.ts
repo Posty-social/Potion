@@ -98,37 +98,37 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
       return toSummary(page ?? pages[0])
     },
     async setPageIcon() {
-      return { ok: true as const }
+      return
     },
     async deletePage() {
-      return { ok: true as const }
+      return
     },
     async createBlock() {
       return { blockId: 'block_new', databaseId: null }
     },
     async setBlockChecked() {
-      return { ok: true as const }
+      return
     },
     async deleteBlock() {
-      return { ok: true as const }
+      return
     },
     async addRow() {
       return { rowId: 'row_new' }
     },
     async updateRow() {
-      return { ok: true as const }
+      return
     },
     async updateRowBody() {
-      return { ok: true as const }
+      return
     },
     async deleteRow() {
-      return { ok: true as const }
+      return
     },
     async addProperty() {
       return { propertyId: 'prop_new' }
     },
     async updateProperty() {
-      return { ok: true as const }
+      return
     },
     async updateBlock(input) {
       const page = pages.find((candidate) => candidate.id === input.pageId)
@@ -141,7 +141,6 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
       block.content = input.content
       block.version = input.version + 1
       return {
-        ok: true,
         pageId: input.pageId,
         blockId: input.blockId,
         content: input.content,
@@ -184,14 +183,14 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
       ) {
         page.properties.push(property)
       }
-      return { ok: true as const }
+      return
     },
     async updatePageProperty(input) {
       const property = catalog.find((p) => p.id === input.propertyId)
       if (property && input.name !== undefined) {
         property.name = input.name
       }
-      return { ok: true as const }
+      return
     },
     async deletePageProperty(input) {
       const page = pages.find((candidate) => candidate.id === input.pageId)
@@ -201,14 +200,14 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
         )
         delete page.propertyValues[input.propertyId]
       }
-      return { ok: true as const }
+      return
     },
     async setPagePropertyValue(input) {
       const page = pages.find((candidate) => candidate.id === input.pageId)
       if (page) {
         page.propertyValues[input.propertyId] = input.value
       }
-      return { ok: true as const }
+      return
     },
     async addPagePropertyOption(input) {
       const property = catalog.find((p) => p.id === input.propertyId)
@@ -223,7 +222,7 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
       if (option) {
         option.name = input.name
       }
-      return { ok: true as const }
+      return
     },
     async deletePagePropertyOption(input) {
       const property = catalog.find((p) => p.id === input.propertyId)
@@ -232,7 +231,7 @@ function createFakeRepository(): McpRepository & { pages: WorkspacePage[] } {
           (o) => o.id !== input.optionId,
         )
       }
-      return { ok: true as const }
+      return
     },
   }
 }
@@ -318,7 +317,7 @@ describe('MCP workspace tools', () => {
       body: {
         result: {
           structuredContent: {
-            update: { ok: true, content: 'Updated by MCP', version: 2 },
+            update: { content: 'Updated by MCP', version: 2 },
           },
         },
       },
@@ -480,12 +479,15 @@ describe('MCP workspace tools', () => {
     })) as { body: { result: { structuredContent: { propertyId: string } } } }
     expect(added.body.result.structuredContent.propertyId).toBe('prop_new')
 
+    // Mutations with nothing useful to return resolve to an empty result
+    // (no content / no structuredContent), not a filler { ok: true }.
     const updated = (await call(31, 'update_database_property', {
       databaseId: 'database_tasks',
       propertyId: 'prop_new',
       name: 'Page',
-    })) as { body: { result: { structuredContent: { ok: boolean } } } }
-    expect(updated.body.result.structuredContent.ok).toBe(true)
+    })) as { body: { error?: unknown; result?: { content: unknown[] } } }
+    expect(updated.body.error).toBeUndefined()
+    expect(updated.body.result?.content).toEqual([])
 
     // Unknown property types are rejected before reaching the repository.
     const rejected = (await call(32, 'add_database_property', {
