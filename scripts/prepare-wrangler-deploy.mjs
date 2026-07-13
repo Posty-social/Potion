@@ -141,6 +141,13 @@ config.vars = {
   ...(process.env.R2_BUCKET_NAME
     ? { R2_BUCKET_NAME: process.env.R2_BUCKET_NAME }
     : {}),
+  // Needed at runtime to sign R2 presigned PUT/GET URLs for media uploads and
+  // serving. Not sensitive (it appears in every R2 URL). Without it the app
+  // falls back to streaming uploads/downloads through the Worker, which caps
+  // out at the Worker request-body limit.
+  ...(process.env.CLOUDFLARE_ACCOUNT_ID
+    ? { CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID }
+    : {}),
   // Transactional email sender; defaults to noreply@APP_DOMAIN at runtime.
   ...(process.env.FROM_EMAIL_ADDRESS
     ? { FROM_EMAIL_ADDRESS: process.env.FROM_EMAIL_ADDRESS }

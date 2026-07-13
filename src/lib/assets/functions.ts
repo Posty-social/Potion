@@ -15,8 +15,9 @@ const PUT_URL_EXPIRY_SECONDS = 300
 /**
  * Mint a presigned R2 PUT for a page-media upload. Auth-gated to workspace
  * members; the mime/size were validated against the image/video allowlist by
- * the schema. When R2 signing credentials aren't configured (local dev), the
- * client falls back to uploading through the app at POST /api/assets/upload.
+ * the schema. The browser uploads straight to R2 with this URL — there is no
+ * upload-through-the-Worker path. Throws if R2 signing isn't configured (the
+ * signing vars must be present in every environment that allows uploads).
  */
 export const createAssetUploadIntent = createServerFn({ method: 'POST' })
   .validator(assetUploadIntentSchema)
@@ -24,32 +25,22 @@ export const createAssetUploadIntent = createServerFn({ method: 'POST' })
     requireWorkspaceAccess(await resolveWorkspaceAccess(getRequestHeaders()))
 
     const signer = r2Signer()
+    if (!signer.aws) {
+      throw new Error(
+        `Asset uploads are not configured (missing ${signer.missing.join(', ')}).`,
+      )
+    }
+
     const key = buildR2AssetKey({
       assetId: crypto.randomUUID(),
       fileName: data.fileName,
     })
-    // The stable app URL the block stores; GET /api/assets/$ authenticates
-    // and redirects to a fresh presigned GET.
-    const servePath = `/api/${key}`
-    const headers = { 'content-type': data.mime }
-
-    if (!signer.aws) {
-      return {
-        configured: false as const,
-        missing: signer.missing,
-        key,
-        servePath,
-        uploadUrl: null,
-        headers,
-      }
-    }
-
     const request = await signer.aws.sign(
       signer.objectUrl(key, PUT_URL_EXPIRY_SECONDS),
       {
         method: 'PUT',
         headers: {
-          ...headers,
+          'content-type': data.mime,
           'content-length': String(data.sizeBytes),
         },
         aws: { signQuery: true, service: 's3', region: 'auto' },
@@ -57,11 +48,11 @@ export const createAssetUploadIntent = createServerFn({ method: 'POST' })
     )
 
     return {
-      configured: true as const,
-      missing: [] as string[],
       key,
-      servePath,
+      // The stable app URL the block stores; GET /api/assets/$ authenticates
+      // and redirects to a fresh presigned GET.
+      servePath: `/api/${key}`,
       uploadUrl: request.url,
-      headers,
+      headers: { 'content-type': data.mime },
     }
   })

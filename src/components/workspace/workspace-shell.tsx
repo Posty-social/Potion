@@ -114,9 +114,8 @@ function sendWithProgress(options: {
 /**
  * Upload an image/video and return the stable app URL to store as block
  * content. The server mints a presigned R2 PUT (auth-gated, key/type/size
- * all signed) and the browser uploads straight to R2; when signing
- * credentials are absent (local dev) it falls back to uploading through
- * the app.
+ * all signed) and the browser uploads straight to R2 — the file never passes
+ * through the Worker.
  */
 async function uploadAsset(
   file: File,
@@ -126,26 +125,14 @@ async function uploadAsset(
     data: { fileName: file.name, mime: file.type, sizeBytes: file.size },
   })
 
-  if (intent.configured) {
-    await sendWithProgress({
-      url: intent.uploadUrl,
-      method: 'PUT',
-      headers: intent.headers,
-      file,
-      onProgress,
-    })
-    return intent.servePath
-  }
-
-  const body = await sendWithProgress({
-    url: '/api/assets/upload',
-    method: 'POST',
-    headers: { 'content-type': file.type, 'x-file-name': file.name },
+  await sendWithProgress({
+    url: intent.uploadUrl,
+    method: 'PUT',
+    headers: intent.headers,
     file,
     onProgress,
   })
-  const { url } = JSON.parse(body) as { url: string }
-  return url
+  return intent.servePath
 }
 
 /** Upload with a progress toast that resolves to success or error in place. */
