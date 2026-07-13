@@ -57,6 +57,11 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       {
         rel: 'manifest',
         href: '/manifest.json',
+        // The whole app sits behind Cloudflare Access. Browsers fetch the
+        // manifest anonymously by default, so Access 302-redirects it to its
+        // cross-origin login page and the browser reports a CORS error.
+        // Fetching with credentials sends the Access cookie so it loads.
+        crossOrigin: 'use-credentials',
       },
     ],
   }),
