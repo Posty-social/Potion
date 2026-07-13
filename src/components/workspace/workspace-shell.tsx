@@ -275,7 +275,7 @@ function Sidebar({
   const user = mounted ? session?.user : undefined
 
   return (
-    <aside className="sticky top-0 hidden h-screen flex-col overflow-hidden bg-[var(--workspace-side)] lg:flex">
+    <aside className="hidden h-screen flex-col bg-[var(--workspace-side)] lg:flex">
       <WorkspaceSwitcher />
 
       <div className="px-3 pb-2">
