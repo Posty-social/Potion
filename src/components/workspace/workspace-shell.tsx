@@ -275,7 +275,7 @@ function Sidebar({
   const user = mounted ? session?.user : undefined
 
   return (
-    <aside className="hidden min-h-screen flex-col bg-[var(--workspace-side)] lg:flex">
+    <aside className="sticky top-0 hidden h-screen flex-col overflow-hidden bg-[var(--workspace-side)] lg:flex">
       <WorkspaceSwitcher />
 
       <div className="px-3 pb-2">
@@ -293,7 +293,7 @@ function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-1">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         {filtered ? (
           <div className="flex flex-col gap-0.5">
             {filtered.map((page) => (
