@@ -182,6 +182,10 @@ export class WorkspaceRepository {
     private readonly db: AppDatabase,
     private readonly ctx: WorkspaceContext,
     private readonly notifier?: WorkspaceNotifier,
+    // R2 bucket for page media; injected so the repository stays free of the
+    // Workers runtime (and tests can omit it). When absent, media cleanup on
+    // block delete is skipped.
+    private readonly assets?: R2Bucket,
   ) {}
 
   /** Tell live viewers of a page that it changed (no-op without a notifier). */
@@ -1106,9 +1110,36 @@ export class WorkspaceRepository {
       await this.db.delete(blockTable).where(eq(blockTable.id, block.id))
     }
 
+    await this.deleteBlockMedia(block.type, block.content)
     await this.touchPage(block.pageId)
 
     return
+  }
+
+  /**
+   * Best-effort R2 cleanup after an image/video block is deleted, so the
+   * uploaded file doesn't outlive the block that referenced it. Only our own
+   * uploads (served from `/api/assets/<key>`) are removed — external image URLs
+   * and YouTube/Vimeo embeds have no R2 object and are left alone. Never throws:
+   * storage cleanup must not fail the block deletion.
+   */
+  private async deleteBlockMedia(type: string, content: string): Promise<void> {
+    if (type !== 'image' && type !== 'video') {
+      return
+    }
+
+    const url = content.trim()
+    if (!url.startsWith('/api/assets/')) {
+      return
+    }
+
+    // `/api/assets/<assetId>/<file>` → R2 key `assets/<assetId>/<file>`.
+    const key = url.slice('/api/'.length)
+    try {
+      await this.assets?.delete(key)
+    } catch {
+      // Orphaned object is preferable to a failed delete; swallow.
+    }
   }
 
   // --- Database ----------------------------------------------------------
@@ -1985,6 +2016,7 @@ export function createWorkspaceRepository(
   db: AppDatabase,
   ctx: WorkspaceContext,
   notifier?: WorkspaceNotifier,
+  assets?: R2Bucket,
 ): WorkspaceRepository {
-  return new WorkspaceRepository(db, ctx, notifier)
+  return new WorkspaceRepository(db, ctx, notifier, assets)
 }

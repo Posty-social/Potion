@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 
-import { db } from '#/lib/db/connection'
+import { db, getRuntimeEnv } from '#/lib/db/connection'
 import { createPageDocNotifier } from '#/lib/realtime/notify.server'
 
 import { requireWorkspaceAccess } from './access'
@@ -66,6 +66,7 @@ async function requireRepository(): Promise<WorkspaceRepository> {
     db,
     { organizationId, userId: user.id },
     createPageDocNotifier(),
+    getRuntimeEnv().ASSETS,
   )
 }
 

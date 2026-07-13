@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 
-import { db } from '#/lib/db/connection'
+import { db, getRuntimeEnv } from '#/lib/db/connection'
 import {
   mcpToolDefinitions,
   resolveMcpHttpRequest,
@@ -40,7 +40,12 @@ export const Route = createFileRoute('/mcp')({
         const body = await request.json().catch(() => null)
         const context = await resolveMcpContext(request.headers)
         const repository = context
-          ? createWorkspaceRepository(db, context, createPageDocNotifier())
+          ? createWorkspaceRepository(
+              db,
+              context,
+              createPageDocNotifier(),
+              getRuntimeEnv().ASSETS,
+            )
           : null
 
         // Multi-workspace gateway: lets MCP clients list workspaces and target
@@ -69,6 +74,7 @@ export const Route = createFileRoute('/mcp')({
                     userId: context.userId,
                   },
                   createPageDocNotifier(),
+                  getRuntimeEnv().ASSETS,
                 )
               },
             }
