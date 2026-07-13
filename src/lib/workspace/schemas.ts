@@ -111,6 +111,11 @@ export const setBlockCheckedSchema = z.object({
   checked: z.boolean(),
 })
 export const deleteBlockSchema = z.object({ blockId: id })
+export const moveBlockSchema = z.object({
+  blockId: id,
+  // The block to place the moved block after; null moves it to the top.
+  afterBlockId: id.nullable(),
+})
 
 // --- Database ------------------------------------------------------------
 

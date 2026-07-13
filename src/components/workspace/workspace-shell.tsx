@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   FileTextIcon,
   GalleryVerticalEndIcon,
+  GripVerticalIcon,
   Heading1Icon,
   Heading2Icon,
   Heading3Icon,
@@ -679,6 +680,35 @@ function BlockEditor({
   // Which block to move the caret into after it's created (e.g. after Enter).
   const [focusBlockId, setFocusBlockId] = useState<string | null>(null)
 
+  // Drag-to-reorder state: the block being dragged, and where it would drop.
+  const [dragBlockId, setDragBlockId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    blockId: string
+    edge: 'top' | 'bottom'
+  } | null>(null)
+
+  const dropBlock = (targetBlockId: string, edge: 'top' | 'bottom') => {
+    const dragged = dragBlockId
+    setDragBlockId(null)
+    setDropTarget(null)
+    if (!dragged || dragged === targetBlockId) {
+      return
+    }
+    const targetIndex = page.blocks.findIndex((b) => b.id === targetBlockId)
+    const afterBlockId =
+      edge === 'top'
+        ? (page.blocks[targetIndex - 1]?.id ?? null)
+        : targetBlockId
+    if (afterBlockId === dragged) {
+      return // already in that slot
+    }
+    void mutations.moveBlock({
+      pageId: page.id,
+      blockId: dragged,
+      afterBlockId,
+    })
+  }
+
   // Choosing "Image" opens a file picker instead of creating a block; the
   // block is created once the upload lands. The ref remembers where. "Video"
   // instead creates an empty block whose placeholder offers upload OR a
@@ -776,6 +806,19 @@ function BlockEditor({
           key={block.id}
           onAdd={(kind) => addBlock(kind, block.id)}
           onDelete={() => mutations.deleteBlock({ blockId: block.id })}
+          dragging={dragBlockId === block.id}
+          dropEdge={dropTarget?.blockId === block.id ? dropTarget.edge : null}
+          onDragStart={() => setDragBlockId(block.id)}
+          onDragEnd={() => {
+            setDragBlockId(null)
+            setDropTarget(null)
+          }}
+          onDragOverEdge={(edge) => {
+            if (dragBlockId && dragBlockId !== block.id) {
+              setDropTarget({ blockId: block.id, edge })
+            }
+          }}
+          onDropEdge={(edge) => dropBlock(block.id, edge)}
         >
           <BlockView
             page={page}
@@ -883,13 +926,57 @@ function BlockRow({
   children,
   onAdd,
   onDelete,
+  dragging,
+  dropEdge,
+  onDragStart,
+  onDragEnd,
+  onDragOverEdge,
+  onDropEdge,
 }: {
   children: ReactNode
   onAdd: (kind: AddBlockKind) => void
   onDelete: () => void
+  dragging: boolean
+  dropEdge: 'top' | 'bottom' | null
+  onDragStart: () => void
+  onDragEnd: () => void
+  onDragOverEdge: (edge: 'top' | 'bottom') => void
+  onDropEdge: (edge: 'top' | 'bottom') => void
 }) {
+  // Which half of the row the cursor is over decides whether the dragged block
+  // lands above or below this one.
+  const edgeFrom = (event: {
+    currentTarget: HTMLElement
+    clientY: number
+  }): 'top' | 'bottom' => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientY < rect.top + rect.height / 2 ? 'top' : 'bottom'
+  }
+
   return (
-    <div className="group relative flex items-start gap-1">
+    <div
+      className={cn(
+        'group relative flex items-start gap-1',
+        dragging && 'opacity-40',
+      )}
+      onDragOver={(event) => {
+        event.preventDefault()
+        onDragOverEdge(edgeFrom(event))
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        onDropEdge(edgeFrom(event))
+      }}
+    >
+      {/* Drop indicator line. */}
+      {dropEdge ? (
+        <div
+          className={cn(
+            'pointer-events-none absolute right-0 left-10 h-0.5 bg-[var(--accent-plum)]',
+            dropEdge === 'top' ? '-top-px' : '-bottom-px',
+          )}
+        />
+      ) : null}
       <div className="flex w-10 shrink-0 items-center justify-end gap-0.5 pt-1.5 opacity-0 group-hover:opacity-100">
         <AddBlockMenu
           trigger={
@@ -903,6 +990,20 @@ function BlockRow({
           }
           onSelect={onAdd}
         />
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', '')
+            onDragStart()
+          }}
+          onDragEnd={onDragEnd}
+          className="flex size-5 cursor-grab items-center justify-center rounded text-[var(--workspace-ink-soft)] hover:bg-[var(--workspace-hover)] active:cursor-grabbing"
+        >
+          <GripVerticalIcon className="size-3.5" />
+        </button>
         <button
           type="button"
           aria-label="Delete block"

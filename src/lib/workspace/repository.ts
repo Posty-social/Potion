@@ -1117,6 +1117,57 @@ export class WorkspaceRepository {
   }
 
   /**
+   * Reorder a block within its page. `afterBlockId` is the block the moved
+   * block should sit immediately after; null moves it to the top. The new
+   * fractional position is computed between that neighbour and the next,
+   * excluding the block being moved.
+   */
+  async moveBlock(input: {
+    blockId: string
+    afterBlockId?: string | null
+  }): Promise<void> {
+    const block = await this.assertBlockInOrg(input.blockId)
+
+    const siblings = (
+      await this.db
+        .select({ id: blockTable.id, position: blockTable.position })
+        .from(blockTable)
+        .where(eq(blockTable.pageId, block.pageId))
+        .orderBy(asc(blockTable.position))
+    ).filter((candidate) => candidate.id !== block.id)
+
+    const afterId = input.afterBlockId ?? null
+    let before: string | null
+    let after: string | null
+
+    if (afterId === null) {
+      before = null
+      after = siblings[0]?.position ?? null
+    } else {
+      const index = siblings.findIndex((candidate) => candidate.id === afterId)
+      if (index === -1) {
+        // Stale target (e.g. concurrently deleted) — append at the end.
+        before = siblings[siblings.length - 1]?.position ?? null
+        after = null
+      } else {
+        before = siblings[index].position
+        after = siblings[index + 1]?.position ?? null
+      }
+    }
+
+    await this.db
+      .update(blockTable)
+      .set({
+        position: generateKeyBetween(before, after),
+        updatedAt: new Date(),
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(eq(blockTable.id, block.id))
+
+    await this.touchPage(block.pageId)
+  }
+
+  /**
    * Best-effort R2 cleanup after an image/video block is deleted, so the
    * uploaded file doesn't outlive the block that referenced it. Only our own
    * uploads (served from `/api/assets/<key>`) are removed — external image URLs

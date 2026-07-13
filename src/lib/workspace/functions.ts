@@ -36,6 +36,7 @@ import {
   deleteViewSchema,
   getPageSchema,
   importTextSchema,
+  moveBlockSchema,
   renameDatabaseSchema,
   renamePagePropertyOptionSchema,
   renamePageSchema,
@@ -245,6 +246,10 @@ export const setWorkspaceBlockChecked = createServerFn({ method: 'POST' })
 export const deleteWorkspaceBlock = createServerFn({ method: 'POST' })
   .validator(deleteBlockSchema)
   .handler(async ({ data }) => (await requireRepository()).deleteBlock(data))
+
+export const moveWorkspaceBlock = createServerFn({ method: 'POST' })
+  .validator(moveBlockSchema)
+  .handler(async ({ data }) => (await requireRepository()).moveBlock(data))
 
 // --- Database mutations --------------------------------------------------
 

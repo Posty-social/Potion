@@ -19,6 +19,7 @@ import {
   deleteWorkspacePropertyOption,
   deleteWorkspaceRow,
   deleteWorkspaceView,
+  moveWorkspaceBlock,
   renameWorkspaceDatabase,
   renameWorkspacePage,
   renameWorkspacePagePropertyOption,
@@ -320,6 +321,37 @@ export function useWorkspaceMutations() {
         run(setWorkspaceBlockChecked({ data: input })),
       deleteBlock: (input: { blockId: string }) =>
         run(deleteWorkspaceBlock({ data: input })),
+      // Reorder a block within its page. Optimistically splice it into place so
+      // the drag feels instant, then reconcile with the server.
+      moveBlock: (input: {
+        pageId: string
+        blockId: string
+        afterBlockId: string | null
+      }) => {
+        patchPage(input.pageId, (page) => {
+          const moving = page.blocks.find((b) => b.id === input.blockId)
+          if (!moving) {
+            return page
+          }
+          const rest = page.blocks.filter((b) => b.id !== input.blockId)
+          const at =
+            input.afterBlockId === null
+              ? 0
+              : rest.findIndex((b) => b.id === input.afterBlockId) + 1
+          return {
+            ...page,
+            blocks: [...rest.slice(0, at), moving, ...rest.slice(at)],
+          }
+        })
+        sync(
+          moveWorkspaceBlock({
+            data: {
+              blockId: input.blockId,
+              afterBlockId: input.afterBlockId,
+            },
+          }),
+        )
+      },
       // Database
       renameDatabase: (input: { databaseId: string; title: string }) =>
         run(renameWorkspaceDatabase({ data: input })),
