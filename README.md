@@ -8,6 +8,8 @@ It's designed to be **forked and deployed to your own Cloudflare account**. Ever
 deployment-specific value (account, domain, resource names, OAuth creds) comes from
 GitHub Actions variables and secrets, so there's nothing to hardcode.
 
+<img src="screenshots/page.png" />
+
 ## Features
 
 - **Pages & blocks** — nested pages with headings, to-dos, quotes, callouts,
