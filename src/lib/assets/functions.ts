@@ -1,8 +1,10 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 
+import { db } from '#/lib/db/connection'
 import { requireWorkspaceAccess } from '#/lib/workspace/access'
 import { resolveWorkspaceAccess } from '#/lib/workspace/access.server'
+import { createWorkspaceRepository } from '#/lib/workspace/repository'
 
 import { assetUploadIntentSchema, buildR2AssetKey } from './intents'
 import { r2Signer } from './r2.server'
@@ -22,7 +24,9 @@ const PUT_URL_EXPIRY_SECONDS = 300
 export const createAssetUploadIntent = createServerFn({ method: 'POST' })
   .validator(assetUploadIntentSchema)
   .handler(async ({ data }) => {
-    requireWorkspaceAccess(await resolveWorkspaceAccess(getRequestHeaders()))
+    const { organizationId, user } = requireWorkspaceAccess(
+      await resolveWorkspaceAccess(getRequestHeaders()),
+    )
 
     const signer = r2Signer()
     if (!signer.aws) {
@@ -31,9 +35,20 @@ export const createAssetUploadIntent = createServerFn({ method: 'POST' })
       )
     }
 
-    const key = buildR2AssetKey({
-      assetId: crypto.randomUUID(),
-      fileName: data.fileName,
+    const assetId = crypto.randomUUID()
+    const key = buildR2AssetKey({ assetId, fileName: data.fileName })
+
+    // Record the upload against this workspace so only its members can read
+    // it. Recorded before the browser uploads; if the upload never happens,
+    // the scheduled cleanup removes the unused record.
+    await createWorkspaceRepository(db, {
+      organizationId,
+      userId: user.id,
+    }).recordAsset({
+      assetId,
+      key,
+      mime: data.mime,
+      sizeBytes: data.sizeBytes,
     })
     const request = await signer.aws.sign(
       signer.objectUrl(key, PUT_URL_EXPIRY_SECONDS),

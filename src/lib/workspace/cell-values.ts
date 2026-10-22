@@ -312,25 +312,181 @@ export function normalizeRowValues(input: {
   const result: Record<string, CellValue> = {}
 
   for (const [key, raw] of Object.entries(input.values)) {
-    const property =
-      input.properties.find((candidate) => candidate.id === key) ??
-      input.properties.find(
-        (candidate) =>
-          candidate.name.trim().toLowerCase() === key.trim().toLowerCase(),
-      )
-
-    if (!property) {
-      throw new CellValueError(
-        `Database "${input.databaseId}" has no column "${key}". Columns: ${input.properties
-          .map((candidate) => `"${candidate.name}" (${candidate.id})`)
-          .join(', ')}.`,
-      )
-    }
+    const property = resolveColumn(input.properties, key, input.databaseId)
 
     result[property.id] = normalizeCellValue(property, raw, {
       members: input.members,
       addOptionHint: `Add it first with add_database_option (databaseId "${input.databaseId}", propertyId "${property.id}").`,
     })
+  }
+
+  return result
+}
+
+// --- Column lookup, filters and readable values (MCP reads) --------------
+
+/** A column by id or (case-insensitive) name, or a clear error. */
+export function resolveColumn(
+  properties: DatabaseProperty[],
+  key: string,
+  databaseId: string,
+): DatabaseProperty {
+  const property =
+    properties.find((candidate) => candidate.id === key) ??
+    properties.find(
+      (candidate) =>
+        candidate.name.trim().toLowerCase() === key.trim().toLowerCase(),
+    )
+
+  if (!property) {
+    throw new CellValueError(
+      `Database "${databaseId}" has no column "${key}". Columns: ${properties
+        .map((candidate) => `"${candidate.name}" (${candidate.id})`)
+        .join(', ')}.`,
+    )
+  }
+
+  return property
+}
+
+/**
+ * One `where` condition for a database read, already resolved to ids. Values
+ * within a condition are alternatives (OR); conditions combine with AND.
+ * - equals: the cell is one of the values (select, status, date, number, …)
+ * - includes: the cell (an array) contains one of the values (multi_select,
+ *   person)
+ * - contains: the cell's text contains one of the values, case-insensitively
+ *   (title, text, url, email, phone)
+ * - empty: the cell is unset, empty text or an empty list
+ */
+export type RowCondition = {
+  propertyId: string
+  mode: 'equals' | 'includes' | 'contains' | 'empty'
+  values: Array<string | number | boolean>
+}
+
+const TEXT_TYPES = new Set(['title', 'text', 'url', 'email', 'phone'])
+
+/**
+ * Turn an agent's `where` map (keys: column ids or names; values: a value, a
+ * list of alternatives, or null for "empty") into row conditions, resolving
+ * option names, member emails/names and ISO dates exactly like writes do.
+ */
+export function buildRowConditions(input: {
+  databaseId: string
+  properties: DatabaseProperty[]
+  where: Record<string, unknown>
+  members: MemberRef[]
+}): RowCondition[] {
+  return Object.entries(input.where).map(([key, raw]) => {
+    const property = resolveColumn(input.properties, key, input.databaseId)
+
+    if (COMPUTED_PROPERTY_TYPES.includes(property.type)) {
+      throw new CellValueError(
+        `Column "${property.name}" (${property.id}) is computed and can't be filtered on.`,
+      )
+    }
+    if (isEmpty(raw)) {
+      return { propertyId: property.id, mode: 'empty', values: [] }
+    }
+
+    const items = Array.isArray(raw) ? raw : [raw]
+
+    if (TEXT_TYPES.has(property.type)) {
+      return {
+        propertyId: property.id,
+        mode: 'contains',
+        values: items.map((item) => String(item)),
+      }
+    }
+
+    const context = {
+      members: input.members,
+      addOptionHint: `It has to exist before you can filter on it.`,
+    }
+    const values = items.flatMap((item) => {
+      const value = normalizeCellValue(property, item, context)
+      return Array.isArray(value) ? value : value === null ? [] : [value]
+    })
+
+    return {
+      propertyId: property.id,
+      mode:
+        property.type === 'multi_select' || property.type === 'person'
+          ? 'includes'
+          : 'equals',
+      values,
+    }
+  })
+}
+
+type ReadableValue =
+  | CellValue
+  | Array<{ id: string; name: string; email: string } | string>
+
+/**
+ * A row's cells keyed by column name with human values: option names instead
+ * of ids, people as { id, name, email }, url cells as a list of links, and
+ * created/last-edited times filled in. Duplicate column names get their id
+ * appended so no cell is lost.
+ */
+export function valuesByName(input: {
+  properties: DatabaseProperty[]
+  row: {
+    values: Record<string, CellValue>
+    createdAt: string
+    updatedAt: string
+  }
+  members: MemberRef[]
+}): Record<string, ReadableValue> {
+  const result: Record<string, ReadableValue> = {}
+  const seen = new Set<string>()
+
+  for (const property of input.properties) {
+    const label = seen.has(property.name)
+      ? `${property.name} (${property.id})`
+      : property.name
+    seen.add(property.name)
+
+    const value =
+      property.type === 'created_time'
+        ? input.row.createdAt
+        : property.type === 'last_edited_time'
+          ? input.row.updatedAt
+          : input.row.values[property.id]
+
+    if (value === undefined || value === null) {
+      result[label] = null
+      continue
+    }
+
+    const optionName = (id: string) =>
+      property.options?.find((option) => option.id === id)?.name ?? id
+
+    switch (property.type) {
+      case 'select':
+      case 'status':
+        result[label] = typeof value === 'string' ? optionName(value) : value
+        break
+      case 'multi_select':
+        result[label] = Array.isArray(value) ? value.map(optionName) : value
+        break
+      case 'person': {
+        const ids = Array.isArray(value) ? value : [String(value)]
+        result[label] = ids.map((id) => {
+          const member = input.members.find((m) => m.userId === id)
+          return member
+            ? { id, name: member.name, email: member.email }
+            : { id, name: id, email: '' }
+        })
+        break
+      }
+      case 'url':
+        result[label] = splitUrls(value)
+        break
+      default:
+        result[label] = value
+    }
   }
 
   return result

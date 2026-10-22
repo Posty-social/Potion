@@ -161,7 +161,14 @@ blocks, database rows (including archiving), database columns and their
 select/status options, shared page properties, and to upload images
 (`upload_asset`) for image blocks and row-body Markdown. Large databases are
 paged (`read_database` `limit`/`offset`) and row bodies are only returned on
-request (`includeBodies`, `read_row`).
+request (`includeBodies`, `read_row`). `read_database` filters with `where`
+(e.g. `{ "Status": "Done" }`), `search_rows` finds cards by text, and
+`valueFormat: "names"` returns readable cells. `update_row` takes an optional
+`expectedVersion` to avoid overwriting someone else's edit.
+
+Uploaded files are readable only by members of the workspace they were
+uploaded to, and a daily cron (`triggers` in `wrangler.jsonc`) deletes uploads
+nothing has referenced for 7 days.
 
 ## Testing
 

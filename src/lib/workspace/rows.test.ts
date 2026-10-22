@@ -23,6 +23,7 @@ function row(id: string, done: boolean, isArchived = false): DatabaseRow {
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     pageId: null,
+    version: 1,
     isArchived,
     archivedAt: isArchived ? new Date(0).toISOString() : null,
   }
