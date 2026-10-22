@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { filterRows } from './rows'
+import { filterRows, splitArchived } from './rows'
 import type { DatabaseProperty, DatabaseRow } from './types'
 
 const status: DatabaseProperty = {
@@ -53,5 +53,16 @@ describe('archive filtering', () => {
     expect(
       ids(filterRows(rows, { filters, byId, showArchived: true })),
     ).toEqual(['b', 'c'])
+  })
+})
+
+describe('splitArchived', () => {
+  it('separates archived rows into their own list, keeping order', () => {
+    const shown = filterRows(rows, { filters: [], byId, showArchived: true })
+    const { active, archived } = splitArchived(shown)
+
+    // The archived Done card is not back among the active Done cards.
+    expect(ids(active)).toEqual(['a', 'b'])
+    expect(ids(archived)).toEqual(['c'])
   })
 })

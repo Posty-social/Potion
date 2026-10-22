@@ -47,3 +47,21 @@ export function filterRows(
       }),
   )
 }
+
+/**
+ * Split a view's rows into active and archived, keeping order. With "Show
+ * archived" on, archived rows render in their own list (an Archived board
+ * column, or a section below the table) rather than back among the active
+ * rows they were grouped with.
+ */
+export function splitArchived(rows: DatabaseRow[]): {
+  active: DatabaseRow[]
+  archived: DatabaseRow[]
+} {
+  const active: DatabaseRow[] = []
+  const archived: DatabaseRow[] = []
+  for (const row of rows) {
+    ;(row.isArchived ? archived : active).push(row)
+  }
+  return { active, archived }
+}

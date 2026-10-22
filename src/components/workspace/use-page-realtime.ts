@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 
 import type { PageDocViewer } from '#/lib/realtime/messages'
 
+import { hasPendingRowWrites } from './row-write-queue'
+
 export type { PageDocViewer }
 
 // One realtime identity per tab: distinguishes two tabs of the same user so
@@ -60,8 +62,13 @@ export function usePageRealtime(pageId: string): PageDocViewer[] {
         }
 
         if (message.type === 'doc:update') {
-          // Another tab, user, or MCP agent changed this page: refetch.
-          void queryClient.invalidateQueries({ queryKey: ['workspace'] })
+          // Another tab, user, or MCP agent changed this page: refetch. While
+          // this tab still has row writes queued, skip it: they refetch once
+          // the queue drains, and an earlier refetch would briefly undo their
+          // optimistic updates.
+          if (!hasPendingRowWrites()) {
+            void queryClient.invalidateQueries({ queryKey: ['workspace'] })
+          }
         } else if (message.type === 'presence:state') {
           setViewers(
             (message.viewers ?? []).filter(

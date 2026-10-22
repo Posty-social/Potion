@@ -85,7 +85,7 @@ import {
   workspacePagesQuery,
 } from '#/lib/workspace/functions'
 import { Markdown } from '#/lib/workspace/markdown'
-import { filterRows } from '#/lib/workspace/rows'
+import { filterRows, splitArchived } from '#/lib/workspace/rows'
 import {
   COMPUTED_PROPERTY_TYPES,
   FIELD_OPTION_COLOR_NAMES,
@@ -1796,6 +1796,45 @@ function TableView({
     getCoreRowModel: getCoreRowModel(),
   })
   const titlePropertyId = database.titlePropertyId
+  // Archived rows (shown only with "Show archived" on) get their own section
+  // below the active rows rather than mixing back in.
+  const tableRows = table.getRowModel().rows
+  const activeRows = tableRows.filter((row) => !row.original.isArchived)
+  const archivedRows = tableRows.filter((row) => row.original.isArchived)
+  const renderRow = (row: (typeof tableRows)[number]) => (
+    <tr
+      key={row.id}
+      className={cn(
+        'group border-b border-[var(--workspace-line)] transition-colors hover:bg-[var(--workspace-muted)]/40',
+        row.original.isArchived && 'opacity-60',
+      )}
+    >
+      {row.getVisibleCells().map((cell) => (
+        <td
+          key={cell.id}
+          className="border-r border-[var(--workspace-line)] align-middle"
+        >
+          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+        </td>
+      ))}
+      <td className="px-1 align-middle">
+        <div className="flex items-center justify-center gap-1">
+          {row.original.isArchived ? (
+            <ArchiveIcon
+              className="size-3.5 text-[var(--workspace-ink-soft)]"
+              aria-label="Archived"
+            />
+          ) : null}
+          <RowActionsMenu
+            row={row.original}
+            mutations={mutations}
+            onOpenRow={onOpenRow}
+            label="Row actions"
+          />
+        </div>
+      </td>
+    </tr>
+  )
 
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--workspace-line)]">
@@ -1827,40 +1866,7 @@ function TableView({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr
-              key={row.id}
-              className={cn(
-                'group border-b border-[var(--workspace-line)] transition-colors hover:bg-[var(--workspace-muted)]/40',
-                row.original.isArchived && 'opacity-60',
-              )}
-            >
-              {row.getVisibleCells().map((cell) => (
-                <td
-                  key={cell.id}
-                  className="border-r border-[var(--workspace-line)] align-middle"
-                >
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-              <td className="px-1 align-middle">
-                <div className="flex items-center justify-center gap-1">
-                  {row.original.isArchived ? (
-                    <ArchiveIcon
-                      className="size-3.5 text-[var(--workspace-ink-soft)]"
-                      aria-label="Archived"
-                    />
-                  ) : null}
-                  <RowActionsMenu
-                    row={row.original}
-                    mutations={mutations}
-                    onOpenRow={onOpenRow}
-                    label="Row actions"
-                  />
-                </div>
-              </td>
-            </tr>
-          ))}
+          {activeRows.map(renderRow)}
           {/* Empty starter row — typing the name creates a real row. */}
           <tr className="border-t border-[var(--workspace-line)]">
             <td className="align-middle" colSpan={properties.length + 1}>
@@ -1887,6 +1893,22 @@ function TableView({
               />
             </td>
           </tr>
+          {archivedRows.length > 0 ? (
+            <>
+              <tr className="border-t-2 border-[var(--workspace-line)] bg-[var(--workspace-muted)]">
+                <td
+                  colSpan={properties.length + 1}
+                  className="px-3 py-1.5 text-xs font-bold tracking-wide text-[var(--workspace-ink-soft)] uppercase"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ArchiveIcon className="size-3.5" />
+                    Archived ({archivedRows.length})
+                  </span>
+                </td>
+              </tr>
+              {archivedRows.map(renderRow)}
+            </>
+          ) : null}
         </tbody>
       </table>
     </div>
@@ -2072,10 +2094,25 @@ function BoardView({
   }
 
   const options = groupProperty.options ?? []
-  const uncategorized = rows.filter((row) => {
+  // With "Show archived" on, archived cards get their own column instead of
+  // reappearing in the status column they were archived from.
+  const { active, archived } = splitArchived(rows)
+  const archivedIds = new Set(archived.map((row) => row.id))
+  const uncategorized = active.filter((row) => {
     const value = row.values[groupProperty.id]
     return typeof value !== 'string' || !options.some((o) => o.id === value)
   })
+  // Dropping a card on a status column sets that status; an archived card
+  // dragged out of the Archived column is unarchived too.
+  const moveTo = (optionId: string | null) => (rowId: string) => {
+    if (archivedIds.has(rowId)) {
+      void mutations.setRowsArchived({ rowIds: [rowId], archived: false })
+    }
+    void mutations.updateRow({
+      rowId,
+      values: { [groupProperty.id]: optionId },
+    })
+  }
 
   return (
     <div className="flex gap-3 overflow-x-auto px-1 pb-2">
@@ -2088,11 +2125,12 @@ function BoardView({
           optionId={option.id}
           title={option.name}
           color={option.color}
-          rows={rows.filter(
+          rows={active.filter(
             (row) => row.values[groupProperty.id] === option.id,
           )}
           mutations={mutations}
           onOpenRow={onOpenRow}
+          onDropRow={moveTo(option.id)}
         />
       ))}
       <BoardColumn
@@ -2105,7 +2143,17 @@ function BoardView({
         rows={uncategorized}
         mutations={mutations}
         onOpenRow={onOpenRow}
+        onDropRow={moveTo(null)}
       />
+      {archived.length > 0 ? (
+        <ArchivedBoardColumn
+          database={database}
+          properties={properties}
+          rows={archived}
+          mutations={mutations}
+          onOpenRow={onOpenRow}
+        />
+      ) : null}
       <button
         type="button"
         onClick={() =>
@@ -2134,6 +2182,7 @@ function BoardColumn({
   rows,
   mutations,
   onOpenRow,
+  onDropRow,
 }: {
   database: WorkspaceDatabase
   properties: DatabaseProperty[]
@@ -2144,6 +2193,7 @@ function BoardColumn({
   rows: DatabaseRow[]
   mutations: WorkspaceMutations
   onOpenRow: (id: string) => void
+  onDropRow: (rowId: string) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
   const activeRowIds = rows.filter((row) => !row.isArchived).map((r) => r.id)
@@ -2160,12 +2210,11 @@ function BoardColumn({
         setDragOver(false)
         const rowId = event.dataTransfer.getData('text/plain')
         if (rowId) {
-          void mutations.updateRow({
-            rowId,
-            values: { [groupPropertyId]: optionId },
-          })
+          onDropRow(rowId)
         }
       }}
+      data-testid="board-column"
+      data-column={title}
       className={cn(
         'flex w-60 shrink-0 flex-col gap-2 rounded-lg border border-transparent bg-[var(--workspace-muted)] p-2 transition-colors',
         dragOver && 'border-[var(--accent-plum)] bg-[var(--workspace-hover)]',
@@ -2278,6 +2327,75 @@ function BoardColumn({
         <PlusIcon className="size-3.5" />
         New card
       </button>
+    </div>
+  )
+}
+
+/**
+ * The board's "Archived" list, shown when the view's "Show archived" toggle
+ * is on. Cards keep their status (shown as a chip) but are listed here rather
+ * than in their status column. Dropping a card here archives it.
+ */
+function ArchivedBoardColumn({
+  database,
+  properties,
+  rows,
+  mutations,
+  onOpenRow,
+}: {
+  database: WorkspaceDatabase
+  properties: DatabaseProperty[]
+  rows: DatabaseRow[]
+  mutations: WorkspaceMutations
+  onOpenRow: (id: string) => void
+}) {
+  const [dragOver, setDragOver] = useState(false)
+
+  return (
+    // Drop handlers live on a plain wrapper (like the other board columns);
+    // the labelled section inside is what assistive tech and tests see.
+    <div
+      onDragOver={(event) => {
+        event.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(event: DragEvent) => {
+        event.preventDefault()
+        setDragOver(false)
+        const rowId = event.dataTransfer.getData('text/plain')
+        if (rowId && !rows.some((row) => row.id === rowId)) {
+          void mutations.setRowsArchived({ rowIds: [rowId], archived: true })
+        }
+      }}
+      className={cn(
+        'flex w-60 shrink-0 flex-col gap-2 rounded-lg border border-dashed border-[var(--workspace-line)] p-2 transition-colors',
+        dragOver && 'border-[var(--accent-plum)] bg-[var(--workspace-hover)]',
+      )}
+    >
+      <section aria-label="Archived cards" className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-1 px-1 py-0.5 text-[var(--workspace-ink-soft)]">
+          <span className="flex items-center gap-1.5 text-sm font-bold">
+            <ArchiveIcon className="size-3.5" />
+            Archived
+          </span>
+          <span className="text-xs tabular-nums">{rows.length}</span>
+        </div>
+        <div className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <BoardCard
+              key={row.id}
+              database={database}
+              // Show the card's status here, since its column no longer does.
+              properties={properties}
+              groupPropertyId=""
+              row={row}
+              mutations={mutations}
+              onOpenRow={onOpenRow}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
@@ -2493,7 +2611,6 @@ function BoardCard({
         >
           {typeof title === 'string' && title ? title : 'Untitled'}
         </button>
-        {row.isArchived ? <ArchivedBadge /> : null}
         <RowActionsMenu
           row={row}
           mutations={mutations}
@@ -2519,40 +2636,42 @@ function ListView({
   mutations,
   onOpenRow,
 }: SharedViewProps) {
+  const { active, archived } = splitArchived(rows)
+  const renderRow = (row: DatabaseRow) => {
+    const title = row.values[database.titlePropertyId]
+    return (
+      <div
+        key={row.id}
+        className={cn(
+          'group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--workspace-hover)]',
+          row.isArchived && 'opacity-60',
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => onOpenRow(row.id)}
+          className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline"
+        >
+          {typeof title === 'string' && title ? title : 'Untitled'}
+        </button>
+        <CardProperties
+          properties={properties}
+          row={row}
+          excludeIds={[database.titlePropertyId]}
+        />
+        <RowActionsMenu
+          row={row}
+          mutations={mutations}
+          onOpenRow={onOpenRow}
+          label="Row actions"
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-0.5 px-1">
-      {rows.map((row) => {
-        const title = row.values[database.titlePropertyId]
-        return (
-          <div
-            key={row.id}
-            className={cn(
-              'group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--workspace-hover)]',
-              row.isArchived && 'opacity-60',
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => onOpenRow(row.id)}
-              className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline"
-            >
-              {typeof title === 'string' && title ? title : 'Untitled'}
-            </button>
-            {row.isArchived ? <ArchivedBadge /> : null}
-            <CardProperties
-              properties={properties}
-              row={row}
-              excludeIds={[database.titlePropertyId]}
-            />
-            <RowActionsMenu
-              row={row}
-              mutations={mutations}
-              onOpenRow={onOpenRow}
-              label="Row actions"
-            />
-          </div>
-        )
-      })}
+      {active.map(renderRow)}
       <button
         type="button"
         onClick={() => mutations.addRow({ databaseId: database.id })}
@@ -2561,6 +2680,18 @@ function ListView({
         <PlusIcon className="size-4" />
         New
       </button>
+      {archived.length > 0 ? (
+        <section
+          aria-label="Archived rows"
+          className="mt-2 flex flex-col gap-0.5"
+        >
+          <h4 className="flex items-center gap-1.5 border-t border-[var(--workspace-line)] px-2 pt-2 pb-1 text-xs font-bold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
+            <ArchiveIcon className="size-3.5" />
+            Archived ({archived.length})
+          </h4>
+          {archived.map(renderRow)}
+        </section>
+      ) : null}
     </div>
   )
 }
@@ -2574,29 +2705,35 @@ function GalleryView({
   mutations,
   onOpenRow,
 }: SharedViewProps) {
+  const { active, archived } = splitArchived(rows)
+  const renderCard = (row: DatabaseRow) => {
+    const title = row.values[database.titlePropertyId]
+    return (
+      <button
+        key={row.id}
+        type="button"
+        onClick={() => onOpenRow(row.id)}
+        className={cn(
+          'flex cursor-pointer flex-col gap-2 rounded-xl border border-[var(--workspace-line)] bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[var(--accent-plum)] hover:shadow-md',
+          row.isArchived && 'border-dashed opacity-60',
+        )}
+      >
+        <div className="h-20 rounded-lg bg-gradient-to-br from-[var(--workspace-muted)] to-[var(--workspace-hover)]" />
+        <span className="truncate text-sm font-semibold">
+          {typeof title === 'string' && title ? title : 'Untitled'}
+        </span>
+        <CardProperties
+          properties={properties}
+          row={row}
+          excludeIds={[database.titlePropertyId]}
+        />
+      </button>
+    )
+  }
+
   return (
     <div className="grid grid-cols-1 gap-3 px-1 sm:grid-cols-2 lg:grid-cols-3">
-      {rows.map((row) => {
-        const title = row.values[database.titlePropertyId]
-        return (
-          <button
-            key={row.id}
-            type="button"
-            onClick={() => onOpenRow(row.id)}
-            className="flex cursor-pointer flex-col gap-2 rounded-xl border border-[var(--workspace-line)] bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[var(--accent-plum)] hover:shadow-md"
-          >
-            <div className="h-20 rounded-lg bg-gradient-to-br from-[var(--workspace-muted)] to-[var(--workspace-hover)]" />
-            <span className="truncate text-sm font-semibold">
-              {typeof title === 'string' && title ? title : 'Untitled'}
-            </span>
-            <CardProperties
-              properties={properties}
-              row={row}
-              excludeIds={[database.titlePropertyId]}
-            />
-          </button>
-        )
-      })}
+      {active.map(renderCard)}
       <button
         type="button"
         onClick={() => mutations.addRow({ databaseId: database.id })}
@@ -2605,6 +2742,15 @@ function GalleryView({
         <PlusIcon className="size-4" />
         New
       </button>
+      {archived.length > 0 ? (
+        <>
+          <h4 className="col-span-full mt-2 flex items-center gap-1.5 border-t border-[var(--workspace-line)] pt-3 text-xs font-bold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
+            <ArchiveIcon className="size-3.5" />
+            Archived ({archived.length})
+          </h4>
+          {archived.map(renderCard)}
+        </>
+      ) : null}
     </div>
   )
 }
@@ -2781,16 +2927,6 @@ function CalendarView({
 }
 
 // --- Shared bits ---------------------------------------------------------
-
-/** "Archived" marker shown on archived rows when "Show archived" is on. */
-function ArchivedBadge() {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--workspace-hover)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
-      <ArchiveIcon className="size-3" />
-      Archived
-    </span>
-  )
-}
 
 /**
  * Per-row actions (board card, table row, list row): open, archive/unarchive

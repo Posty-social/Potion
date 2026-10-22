@@ -7,6 +7,8 @@ const baseURL = `http://localhost:${port}`
 
 export default defineConfig({
   testDir: './e2e',
+  // Warms the dev server with one serial board load before tests start.
+  globalSetup: './e2e/global-setup.ts',
   timeout: 45_000,
   expect: {
     timeout: 10_000,
