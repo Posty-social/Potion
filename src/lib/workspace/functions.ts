@@ -24,6 +24,7 @@ import {
   updateCatalogPropertySchema,
   addRowSchema,
   addViewSchema,
+  archiveRowsSchema,
   createBlockSchema,
   createPageSchema,
   deleteBlockSchema,
@@ -54,6 +55,7 @@ import {
   setViewTypeSchema,
   updateBlockSchema,
   updatePagePropertySchema,
+  updatePropertyOptionSchema,
   updatePropertySchema,
   updateRowBodySchema,
   updateRowSchema,
@@ -323,6 +325,12 @@ export const renameWorkspacePropertyOption = createServerFn({ method: 'POST' })
     (await requireRepository()).renamePropertyOption(data),
   )
 
+export const updateWorkspacePropertyOption = createServerFn({ method: 'POST' })
+  .validator(updatePropertyOptionSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).updatePropertyOption(data),
+  )
+
 export const deleteWorkspacePropertyOption = createServerFn({ method: 'POST' })
   .validator(deletePropertyOptionSchema)
   .handler(async ({ data }) =>
@@ -345,6 +353,12 @@ export const updateWorkspaceRowBody = createServerFn({ method: 'POST' })
 export const deleteWorkspaceRow = createServerFn({ method: 'POST' })
   .validator(deleteRowSchema)
   .handler(async ({ data }) => (await requireRepository()).deleteRow(data))
+
+export const archiveWorkspaceRows = createServerFn({ method: 'POST' })
+  .validator(archiveRowsSchema)
+  .handler(async ({ data }) =>
+    (await requireRepository()).setRowsArchived(data),
+  )
 
 // --- Import --------------------------------------------------------------
 

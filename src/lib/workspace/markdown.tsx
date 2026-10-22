@@ -3,14 +3,18 @@
 // Safety: it never touches `dangerouslySetInnerHTML`. Every piece of user text
 // becomes either a React text node or a known element (strong / em / code / …),
 // so there is no path for raw HTML to be injected. Link hrefs are passed
-// through `safeUrl`, which only allows http(s)/mailto/tel and same-origin paths.
+// through `safeUrl`, which only allows http(s)/mailto/tel and same-origin paths;
+// image sources (`![alt](src)`) through `safeImageSrc`, which only allows
+// same-origin paths (e.g. /api/assets/…) and https URLs.
 
 import type { ReactNode } from 'react'
 
 // Inline spans, in priority order. Bold (`**`/`__`) is listed before italic so
-// it wins the match; code is captured raw and never re-parsed.
+// it wins the match; code is captured raw and never re-parsed. Images are last
+// so existing group numbers stay put; matching is leftmost-first, so `![` still
+// beats the plain link that would start one character later.
 const INLINE =
-  /(\*\*([^*]+?)\*\*|__([^_]+?)__|\*([^*\n]+?)\*|_([^_\n]+?)_|~~([^~]+?)~~|`([^`]+?)`|\[([^\]]+?)\]\(([^)\s]+?)\))/
+  /(\*\*([^*]+?)\*\*|__([^_]+?)__|\*([^*\n]+?)\*|_([^_\n]+?)_|~~([^~]+?)~~|`([^`]+?)`|\[([^\]]+?)\]\(([^)\s]+?)\)|!\[([^\]]*?)\]\(([^)\s]+?)\))/
 
 function safeUrl(raw: string): string | null {
   const url = raw.trim()
@@ -26,6 +30,17 @@ function safeUrl(raw: string): string | null {
 
   // Reject javascript:, data:, vbscript:, etc.
   return null
+}
+
+function safeImageSrc(raw: string): string | null {
+  const url = raw.trim()
+
+  // Same-origin paths (uploaded assets), but not protocol-relative `//host`.
+  if (url.startsWith('/') && !url.startsWith('//')) {
+    return url
+  }
+
+  return /^https:\/\//i.test(url) ? url : null
 }
 
 /**
@@ -69,6 +84,21 @@ export function renderInline(text: string, keyPrefix = ''): ReactNode[] {
         >
           {match[7]}
         </code>,
+      )
+    } else if (match[10] !== undefined && match[11] !== undefined) {
+      const src = safeImageSrc(match[11])
+      nodes.push(
+        src ? (
+          <img
+            key={key}
+            src={src}
+            alt={match[10]}
+            loading="lazy"
+            className="my-2 inline-block max-h-[32rem] max-w-full rounded-lg border border-[var(--workspace-line)]"
+          />
+        ) : (
+          token
+        ),
       )
     } else if (match[8] !== undefined && match[9] !== undefined) {
       const href = safeUrl(match[9])

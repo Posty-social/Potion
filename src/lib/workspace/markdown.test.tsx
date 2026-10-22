@@ -31,6 +31,35 @@ describe('renderInline', () => {
     expect(xss).not.toContain('<a ')
   })
 
+  it('renders images from uploaded assets and https URLs', () => {
+    const asset = inline('![login bug](/api/assets/a1/login-bug.png)')
+    expect(asset).toContain('<img')
+    expect(asset).toContain('src="/api/assets/a1/login-bug.png"')
+    expect(asset).toContain('alt="login bug"')
+    expect(asset).not.toContain('<a ')
+
+    expect(inline('![x](https://example.com/x.png)')).toContain(
+      'src="https://example.com/x.png"',
+    )
+  })
+
+  it('rejects unsafe image sources', () => {
+    for (const src of [
+      'javascript:alert(1)',
+      'data:image/png;base64,AAAA',
+      '//evil.example/x.png',
+      'http://example.com/x.png',
+    ]) {
+      expect(inline(`![x](${src})`)).not.toContain('<img')
+    }
+  })
+
+  it('renders an image inside a row body paragraph', () => {
+    const out = block('Steps:\n\n![shot](/api/assets/a1/shot.png)')
+    expect(out).toContain('<p')
+    expect(out).toContain('<img')
+  })
+
   it('escapes raw HTML in user text', () => {
     const out = inline('<img src=x onerror="alert(1)">')
     expect(out).not.toContain('<img')

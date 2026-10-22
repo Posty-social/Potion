@@ -7,6 +7,8 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ArrowDownUpIcon,
   AtSignIcon,
   CalendarIcon,
@@ -16,6 +18,8 @@ import {
   ChevronRightIcon,
   CircleDotIcon,
   ClockIcon,
+  EllipsisIcon,
+  EyeIcon,
   FileTextIcon,
   GalleryVerticalEndIcon,
   HashIcon,
@@ -27,6 +31,7 @@ import {
   LoaderIcon,
   MaximizeIcon,
   MenuIcon,
+  PencilIcon,
   PhoneIcon,
   PlusIcon,
   Settings2Icon,
@@ -69,12 +74,21 @@ import { Input } from '#/components/ui/input'
 import { Sheet, SheetContent, SheetTitle } from '#/components/ui/sheet'
 import { cn } from '#/lib/utils'
 import {
+  dateInputValue,
+  formatDateValue,
+  isHttpUrl,
+  linkLabel,
+  splitUrls,
+} from '#/lib/workspace/cell-values'
+import {
   workspaceMembersQuery,
   workspacePagesQuery,
 } from '#/lib/workspace/functions'
 import { Markdown } from '#/lib/workspace/markdown'
+import { filterRows } from '#/lib/workspace/rows'
 import {
   COMPUTED_PROPERTY_TYPES,
+  FIELD_OPTION_COLOR_NAMES,
   OPTION_PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
   initialsFor,
@@ -176,30 +190,6 @@ function cellValueFor(property: DatabaseProperty, row: DatabaseRow): CellValue {
 
 // --- filter / sort helpers ----------------------------------------------
 
-function matchesFilter(
-  row: DatabaseRow,
-  filter: DatabaseFilter,
-  property: DatabaseProperty,
-): boolean {
-  if (!filter.value) {
-    return true
-  }
-  const value = row.values[filter.propertyId]
-
-  if (property.type === 'select' || property.type === 'status') {
-    return value === filter.value
-  }
-  if (property.type === 'multi_select') {
-    return Array.isArray(value) && value.includes(filter.value)
-  }
-  if (property.type === 'checkbox') {
-    return String(value === true) === filter.value
-  }
-  return String(value ?? '')
-    .toLowerCase()
-    .includes(filter.value.toLowerCase())
-}
-
 function compareRows(
   a: DatabaseRow,
   b: DatabaseRow,
@@ -242,9 +232,18 @@ export function DatabaseElement({ database, mutations }: Props) {
   const [optionsPropertyId, setOptionsPropertyId] = useState<string | null>(
     null,
   )
+  // "Show archived" is a per-view, per-viewer toggle (local UI state, not
+  // persisted): archived rows are hidden unless the active view opts in.
+  const [showArchivedByView, setShowArchivedByView] = useState<
+    Record<string, boolean>
+  >({})
 
   const activeView =
     database.views.find((view) => view.id === activeViewId) ?? database.views[0]
+  const showArchived = activeView
+    ? Boolean(showArchivedByView[activeView.id])
+    : false
+  const archivedCount = database.rows.filter((row) => row.isArchived).length
 
   const byId = useMemo(
     () => new Map(database.properties.map((p) => [p.id, p])),
@@ -262,18 +261,23 @@ export function DatabaseElement({ database, mutations }: Props) {
   }, [database.properties, activeView?.visiblePropertyIds])
 
   const rows = useMemo(() => {
-    const filtered = database.rows.filter((row) =>
-      (activeView?.filters ?? []).every((filter) => {
-        const property = byId.get(filter.propertyId)
-        return property ? matchesFilter(row, filter, property) : true
-      }),
-    )
+    const filtered = filterRows(database.rows, {
+      filters: activeView?.filters ?? [],
+      byId,
+      showArchived,
+    })
     const sorts = activeView?.sorts ?? []
     if (sorts.length === 0) {
       return filtered
     }
     return [...filtered].sort((a, b) => compareRows(a, b, sorts, byId))
-  }, [database.rows, activeView?.filters, activeView?.sorts, byId])
+  }, [
+    database.rows,
+    activeView?.filters,
+    activeView?.sorts,
+    byId,
+    showArchived,
+  ])
 
   const openRow = database.rows.find((row) => row.id === openRowId) ?? null
   const optionsProperty =
@@ -319,6 +323,14 @@ export function DatabaseElement({ database, mutations }: Props) {
           database={database}
           view={activeView}
           mutations={mutations}
+          archivedCount={archivedCount}
+          showArchived={showArchived}
+          onToggleArchived={() =>
+            setShowArchivedByView((current) => ({
+              ...current,
+              [activeView.id]: !current[activeView.id],
+            }))
+          }
         />
       ) : null}
 
@@ -347,6 +359,14 @@ export function DatabaseElement({ database, mutations }: Props) {
         <PropertyOptionsDialog
           property={optionsProperty}
           onClose={() => setOptionsPropertyId(null)}
+          onRecolorOption={(optionId, color) =>
+            mutations.updatePropertyOption({
+              databaseId: database.id,
+              propertyId: optionsProperty.id,
+              optionId,
+              color,
+            })
+          }
           onAddOption={(name) =>
             mutations.addPropertyOption({
               databaseId: database.id,
@@ -543,10 +563,16 @@ function ViewToolbar({
   database,
   view,
   mutations,
+  archivedCount,
+  showArchived,
+  onToggleArchived,
 }: {
   database: WorkspaceDatabase
   view: DatabaseView
   mutations: WorkspaceMutations
+  archivedCount: number
+  showArchived: boolean
+  onToggleArchived: () => void
 }) {
   const groupable = database.properties.filter(
     (p) => p.type === 'select' || p.type === 'status',
@@ -595,6 +621,21 @@ function ViewToolbar({
         properties={database.properties}
         mutations={mutations}
       />
+      {archivedCount > 0 || showArchived ? (
+        <button
+          type="button"
+          aria-pressed={showArchived}
+          onClick={onToggleArchived}
+          className="cursor-pointer"
+        >
+          <ToolbarButton
+            active={showArchived}
+            count={archivedCount}
+            icon={showArchived ? EyeIcon : ArchiveIcon}
+            label="Show archived"
+          />
+        </button>
+      ) : null}
 
       <div className="ml-auto">
         <AddPropertyMenu databaseId={database.id} mutations={mutations} />
@@ -1566,24 +1607,32 @@ export function PropertyEditor({
     return <PageLinkPicker property={property} value={value} onSave={onSave} />
   }
 
+  if (property.type === 'url') {
+    return <UrlListEditor property={property} value={value} onSave={onSave} />
+  }
+
   const inputType =
     property.type === 'number'
       ? 'number'
       : property.type === 'date'
         ? 'date'
-        : property.type === 'url'
-          ? 'url'
-          : property.type === 'email'
-            ? 'email'
-            : property.type === 'phone'
-              ? 'tel'
-              : 'text'
+        : property.type === 'email'
+          ? 'email'
+          : property.type === 'phone'
+            ? 'tel'
+            : 'text'
 
   return (
     <input
       key={`${property.id}:${String(value)}`}
       type={inputType}
-      defaultValue={value === null ? '' : String(value)}
+      defaultValue={
+        property.type === 'date'
+          ? dateInputValue(value)
+          : value === null
+            ? ''
+            : String(value)
+      }
       onBlur={(event) => {
         const raw = event.target.value
         if (property.type === 'number') {
@@ -1599,6 +1648,92 @@ export function PropertyEditor({
       )}
       placeholder="Empty"
     />
+  )
+}
+
+/**
+ * `url` editor: a cell holds one or more links (one per line). Shows each as
+ * a clickable link; the pencil swaps to a textarea for editing.
+ */
+function UrlListEditor({
+  property,
+  value,
+  onSave,
+}: {
+  property: DatabaseProperty
+  value: CellValue
+  onSave: (next: CellValue) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const urls = splitUrls(value)
+
+  if (editing) {
+    return (
+      <textarea
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- opened by an explicit click
+        autoFocus
+        rows={Math.max(2, urls.length + 1)}
+        defaultValue={urls.join('\n')}
+        onBlur={(event) => {
+          setEditing(false)
+          const next = splitUrls(event.target.value).join('\n')
+          if (next !== urls.join('\n')) {
+            onSave(next === '' ? null : next)
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.currentTarget.blur()
+          }
+        }}
+        placeholder="One link per line"
+        aria-label={property.name}
+        className="block w-full resize-none bg-[var(--workspace-muted)] px-3 py-2 text-sm outline-none"
+      />
+    )
+  }
+
+  return (
+    <div className="group/url flex min-h-9 items-start gap-1 px-3 py-1.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {urls.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="cursor-text text-left text-sm text-[var(--workspace-ink-soft)]"
+          >
+            Empty
+          </button>
+        ) : (
+          urls.map((url) =>
+            isHttpUrl(url) ? (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={url}
+                className="truncate text-sm text-[var(--accent-plum)] underline underline-offset-2"
+              >
+                {linkLabel(url)}
+              </a>
+            ) : (
+              <span key={url} className="truncate text-sm">
+                {url}
+              </span>
+            ),
+          )
+        )}
+      </div>
+      <button
+        type="button"
+        aria-label={`Edit ${property.name}`}
+        onClick={() => setEditing(true)}
+        className="shrink-0 cursor-pointer rounded p-1 text-[var(--workspace-ink-soft)] opacity-0 transition-opacity group-hover/url:opacity-100 hover:bg-[var(--workspace-hover)] focus-visible:opacity-100"
+      >
+        <PencilIcon className="size-3" />
+      </button>
+    </div>
   )
 }
 
@@ -1695,7 +1830,10 @@ function TableView({
           {table.getRowModel().rows.map((row) => (
             <tr
               key={row.id}
-              className="group border-b border-[var(--workspace-line)] transition-colors hover:bg-[var(--workspace-muted)]/40"
+              className={cn(
+                'group border-b border-[var(--workspace-line)] transition-colors hover:bg-[var(--workspace-muted)]/40',
+                row.original.isArchived && 'opacity-60',
+              )}
             >
               {row.getVisibleCells().map((cell) => (
                 <td
@@ -1705,17 +1843,21 @@ function TableView({
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}
-              <td className="align-middle">
-                <button
-                  type="button"
-                  aria-label="Delete row"
-                  onClick={() =>
-                    mutations.deleteRow({ rowId: row.original.id })
-                  }
-                  className="flex h-full w-full cursor-pointer items-center justify-center py-2 text-transparent group-hover:text-[var(--workspace-ink-soft)] hover:!text-[var(--accent-rust)]"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
+              <td className="px-1 align-middle">
+                <div className="flex items-center justify-center gap-1">
+                  {row.original.isArchived ? (
+                    <ArchiveIcon
+                      className="size-3.5 text-[var(--workspace-ink-soft)]"
+                      aria-label="Archived"
+                    />
+                  ) : null}
+                  <RowActionsMenu
+                    row={row.original}
+                    mutations={mutations}
+                    onOpenRow={onOpenRow}
+                    label="Row actions"
+                  />
+                </div>
               </td>
             </tr>
           ))}
@@ -2004,6 +2146,7 @@ function BoardColumn({
   onOpenRow: (id: string) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
+  const activeRowIds = rows.filter((row) => !row.isArchived).map((r) => r.id)
 
   return (
     <div
@@ -2062,22 +2205,49 @@ function BoardColumn({
         </span>
         <span className="flex items-center gap-1 text-xs text-[var(--workspace-ink-soft)]">
           <span className="tabular-nums">{rows.length}</span>
-          {optionId ? (
-            <button
-              type="button"
-              aria-label="Delete column"
-              onClick={() =>
-                mutations.deletePropertyOption({
-                  databaseId: database.id,
-                  propertyId: groupPropertyId,
-                  optionId,
-                })
-              }
-              className="cursor-pointer transition-colors hover:text-[var(--accent-rust)]"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${title} column actions`}
+                className="cursor-pointer rounded p-0.5 transition-colors hover:bg-[var(--workspace-hover)] hover:text-[var(--workspace-ink)]"
+              >
+                <EllipsisIcon className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                disabled={activeRowIds.length === 0}
+                onClick={() =>
+                  mutations.setRowsArchived({
+                    rowIds: activeRowIds,
+                    archived: true,
+                  })
+                }
+              >
+                <ArchiveIcon className="size-3.5" />
+                Archive all cards ({activeRowIds.length})
+              </DropdownMenuItem>
+              {optionId ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() =>
+                      mutations.deletePropertyOption({
+                        databaseId: database.id,
+                        propertyId: groupPropertyId,
+                        optionId,
+                      })
+                    }
+                    className="text-[var(--accent-rust)] focus:text-[var(--accent-rust)]"
+                  >
+                    <Trash2Icon className="size-3.5" />
+                    Delete column
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
 
@@ -2213,15 +2383,36 @@ function CardValue({
     if (typeof value !== 'string' || !value.trim()) {
       return null
     }
-    const parsed = new Date(value)
-    const label = Number.isNaN(parsed.getTime())
-      ? value
-      : parsed.toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })
-    return <CardPill title={value}>{label}</CardPill>
+    return <CardPill title={value}>{formatDateValue(value)}</CardPill>
+  }
+
+  if (property.type === 'url') {
+    const urls = splitUrls(value)
+    return (
+      <>
+        {urls.map((url) =>
+          isHttpUrl(url) ? (
+            <a
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={url}
+              // Links sit inside clickable/draggable cards: don't open the card.
+              onClick={(event) => event.stopPropagation()}
+              className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-[var(--workspace-muted)] px-2 py-0.5 text-xs font-medium text-[var(--accent-plum)] hover:underline"
+            >
+              <LinkIcon className="size-3 shrink-0" />
+              <span className="truncate">{linkLabel(url)}</span>
+            </a>
+          ) : (
+            <CardPill key={url} title={url}>
+              {url}
+            </CardPill>
+          ),
+        )}
+      </>
+    )
   }
 
   if (property.type === 'number') {
@@ -2288,7 +2479,11 @@ function BoardCard({
         event.dataTransfer.setData('text/plain', row.id)
         event.dataTransfer.effectAllowed = 'move'
       }}
-      className="group flex cursor-grab flex-col gap-1.5 rounded-lg border border-[var(--workspace-line)] bg-white p-2.5 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
+      data-testid="board-card"
+      className={cn(
+        'group flex cursor-grab flex-col gap-1.5 rounded-lg border border-[var(--workspace-line)] bg-white p-2.5 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing',
+        row.isArchived && 'border-dashed opacity-60',
+      )}
     >
       <div className="flex items-start justify-between gap-1">
         <button
@@ -2298,14 +2493,13 @@ function BoardCard({
         >
           {typeof title === 'string' && title ? title : 'Untitled'}
         </button>
-        <button
-          type="button"
-          aria-label="Delete card"
-          onClick={() => mutations.deleteRow({ rowId: row.id })}
-          className="cursor-pointer text-transparent transition-colors group-hover:text-[var(--workspace-ink-soft)] hover:!text-[var(--accent-rust)]"
-        >
-          <Trash2Icon className="size-3.5" />
-        </button>
+        {row.isArchived ? <ArchivedBadge /> : null}
+        <RowActionsMenu
+          row={row}
+          mutations={mutations}
+          onOpenRow={onOpenRow}
+          label="Card actions"
+        />
       </div>
       <CardProperties
         properties={properties}
@@ -2332,7 +2526,10 @@ function ListView({
         return (
           <div
             key={row.id}
-            className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--workspace-hover)]"
+            className={cn(
+              'group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--workspace-hover)]',
+              row.isArchived && 'opacity-60',
+            )}
           >
             <button
               type="button"
@@ -2341,19 +2538,18 @@ function ListView({
             >
               {typeof title === 'string' && title ? title : 'Untitled'}
             </button>
+            {row.isArchived ? <ArchivedBadge /> : null}
             <CardProperties
               properties={properties}
               row={row}
               excludeIds={[database.titlePropertyId]}
             />
-            <button
-              type="button"
-              aria-label="Delete row"
-              onClick={() => mutations.deleteRow({ rowId: row.id })}
-              className="cursor-pointer text-transparent transition-colors group-hover:text-[var(--workspace-ink-soft)] hover:!text-[var(--accent-rust)]"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
+            <RowActionsMenu
+              row={row}
+              mutations={mutations}
+              onOpenRow={onOpenRow}
+              label="Row actions"
+            />
           </div>
         )
       })}
@@ -2586,6 +2782,84 @@ function CalendarView({
 
 // --- Shared bits ---------------------------------------------------------
 
+/** "Archived" marker shown on archived rows when "Show archived" is on. */
+function ArchivedBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--workspace-hover)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[var(--workspace-ink-soft)] uppercase">
+      <ArchiveIcon className="size-3" />
+      Archived
+    </span>
+  )
+}
+
+/**
+ * Per-row actions (board card, table row, list row): open, archive/unarchive
+ * and delete. Archiving is the reversible way to clear done cards.
+ */
+function RowActionsMenu({
+  row,
+  mutations,
+  onOpenRow,
+  label,
+  className,
+}: {
+  row: DatabaseRow
+  mutations: WorkspaceMutations
+  onOpenRow: (id: string) => void
+  label: string
+  className?: string
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className={cn(
+            'cursor-pointer rounded p-0.5 text-transparent transition-colors group-hover:text-[var(--workspace-ink-soft)] hover:bg-[var(--workspace-hover)] hover:!text-[var(--workspace-ink)] focus-visible:text-[var(--workspace-ink-soft)] data-[state=open]:text-[var(--workspace-ink)]',
+            className,
+          )}
+        >
+          <EllipsisIcon className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onOpenRow(row.id)}>
+          <MaximizeIcon className="size-3.5" />
+          Open
+        </DropdownMenuItem>
+        {row.isArchived ? (
+          <DropdownMenuItem
+            onClick={() =>
+              mutations.setRowsArchived({ rowIds: [row.id], archived: false })
+            }
+          >
+            <ArchiveRestoreIcon className="size-3.5" />
+            Unarchive
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            onClick={() =>
+              mutations.setRowsArchived({ rowIds: [row.id], archived: true })
+            }
+          >
+            <ArchiveIcon className="size-3.5" />
+            Archive
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => mutations.deleteRow({ rowId: row.id })}
+          className="text-[var(--accent-rust)] focus:text-[var(--accent-rust)]"
+        >
+          <Trash2Icon className="size-3.5" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function EmptyViewHint({
   message,
   actionLabel,
@@ -2635,10 +2909,48 @@ function RowPeekPanel({
         <SheetTitle className="sr-only">
           {typeof titleValue === 'string' && titleValue ? titleValue : 'Row'}
         </SheetTitle>
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--workspace-line)] px-4 text-xs font-medium text-[var(--workspace-ink-soft)]">
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--workspace-line)] pr-12 pl-4 text-xs font-medium text-[var(--workspace-ink-soft)]">
           <MaximizeIcon className="size-3.5" />
-          <span className="truncate">{database.title || 'Database'}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {database.title || 'Database'}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={() =>
+              mutations.setRowsArchived({
+                rowIds: [row.id],
+                archived: !row.isArchived,
+              })
+            }
+          >
+            {row.isArchived ? (
+              <>
+                <ArchiveRestoreIcon className="size-3.5" />
+                Unarchive
+              </>
+            ) : (
+              <>
+                <ArchiveIcon className="size-3.5" />
+                Archive
+              </>
+            )}
+          </Button>
         </div>
+
+        {row.isArchived ? (
+          <div className="flex items-center gap-2 border-b border-[var(--workspace-line)] bg-[var(--workspace-muted)] px-6 py-2 text-sm text-[var(--workspace-ink-soft)] md:px-10">
+            <ArchiveIcon className="size-4 shrink-0" />
+            <span className="flex-1">
+              This card is archived
+              {row.archivedAt
+                ? ` (${new Date(row.archivedAt).toLocaleDateString()})`
+                : ''}{' '}
+              and hidden from views.
+            </span>
+          </div>
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 md:px-10">
           <input
@@ -2795,12 +3107,15 @@ export function PropertyOptionsDialog({
   onClose,
   onAddOption,
   onRenameOption,
+  onRecolorOption,
   onDeleteOption,
 }: {
   property: DatabaseProperty
   onClose: () => void
   onAddOption: (name: string) => void | Promise<unknown>
   onRenameOption: (optionId: string, name: string) => void | Promise<unknown>
+  // When provided, each option's colour dot opens a palette picker.
+  onRecolorOption?: (optionId: string, color: string) => void | Promise<unknown>
   onDeleteOption: (optionId: string) => void | Promise<unknown>
 }) {
   return (
@@ -2812,10 +3127,49 @@ export function PropertyOptionsDialog({
         <div className="flex flex-col gap-2">
           {(property.options ?? []).map((option: PropertyOption) => (
             <div key={option.id} className="flex items-center gap-2">
-              <span
-                className="size-3 shrink-0 rounded-full"
-                style={{ backgroundColor: option.color }}
-              />
+              {onRecolorOption ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Colour of ${option.name}`}
+                      className="size-4 shrink-0 cursor-pointer rounded-full ring-1 ring-black/10 transition-transform hover:scale-110"
+                      style={{ backgroundColor: option.color }}
+                    />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {Object.entries(FIELD_OPTION_COLOR_NAMES).map(
+                      ([name, color]) => (
+                        <DropdownMenuItem
+                          key={name}
+                          onClick={() => void onRecolorOption(option.id, color)}
+                        >
+                          <span
+                            className="size-3 rounded-full ring-1 ring-black/10"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span
+                            className={cn(
+                              'capitalize',
+                              color === option.color && 'font-bold',
+                            )}
+                          >
+                            {name}
+                          </span>
+                          {color === option.color ? (
+                            <CheckIcon className="ml-auto size-3.5" />
+                          ) : null}
+                        </DropdownMenuItem>
+                      ),
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <span
+                  className="size-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: option.color }}
+                />
+              )}
               <Input
                 defaultValue={option.name}
                 onBlur={(event) => {

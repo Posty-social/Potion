@@ -9,6 +9,7 @@ import {
   addWorkspacePropertyOption,
   addWorkspaceRow,
   addWorkspaceView,
+  archiveWorkspaceRows,
   createWorkspaceBlock,
   createWorkspacePage,
   deleteWorkspaceBlock,
@@ -37,12 +38,13 @@ import {
   updateWorkspaceBlock,
   updateWorkspacePageProperty,
   updateWorkspaceProperty,
+  updateWorkspacePropertyOption,
   updateWorkspaceRow,
   updateWorkspaceRowBody,
 } from '#/lib/workspace/functions'
 import {
-  FIELD_OPTION_COLORS,
   OPTION_PROPERTY_TYPES,
+  nextOptionColor,
   type CellValue,
   type DatabaseProperty,
   type DatabaseViewType,
@@ -244,10 +246,7 @@ export function useWorkspaceMutations() {
               {
                 id: optionId,
                 name: input.name,
-                color:
-                  FIELD_OPTION_COLORS[
-                    options.length % FIELD_OPTION_COLORS.length
-                  ],
+                color: nextOptionColor(options),
               },
             ],
           }
@@ -412,6 +411,13 @@ export function useWorkspaceMutations() {
         optionId: string
         name: string
       }) => run(renameWorkspacePropertyOption({ data: input })),
+      updatePropertyOption: (input: {
+        databaseId: string
+        propertyId: string
+        optionId: string
+        name?: string
+        color?: string
+      }) => run(updateWorkspacePropertyOption({ data: input })),
       deletePropertyOption: (input: {
         databaseId: string
         propertyId: string
@@ -430,6 +436,25 @@ export function useWorkspaceMutations() {
         run(updateWorkspaceRowBody({ data: input })),
       deleteRow: (input: { rowId: string }) =>
         run(deleteWorkspaceRow({ data: input })),
+      // Archive / unarchive rows. Optimistic so the card leaves (or returns
+      // to) the board immediately; the background sync reconciles with the
+      // server and rolls back on failure.
+      setRowsArchived: (input: { rowIds: string[]; archived: boolean }) => {
+        const archivedAt = input.archived ? new Date().toISOString() : null
+        patchPages((page) => ({
+          ...page,
+          databases: page.databases.map((database) => ({
+            ...database,
+            rows: database.rows.map((row) =>
+              input.rowIds.includes(row.id)
+                ? { ...row, isArchived: input.archived, archivedAt }
+                : row,
+            ),
+          })),
+        }))
+        sync(archiveWorkspaceRows({ data: input }))
+        return Promise.resolve()
+      },
     }
   }, [invalidate, patchPage, patchPages, patchCatalog, queryClient])
 }
