@@ -66,7 +66,7 @@ export function toast(input: ToastInput): number {
     id,
     input.duration !== undefined
       ? input.duration
-      : input.progress != null
+      : input.progress !== undefined && input.progress !== null
         ? null
         : 4000,
   )
@@ -114,11 +114,10 @@ export function Toaster() {
   return (
     <div className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-80 flex-col gap-2">
       {items.map((item) => (
-        <div
+        <output
           key={item.id}
-          role="status"
           className={cn(
-            'animate-in fade-in slide-in-from-bottom-2 pointer-events-auto rounded-lg border bg-[var(--workspace-paper)] p-3 shadow-lg',
+            'block animate-in fade-in slide-in-from-bottom-2 pointer-events-auto rounded-lg border bg-[var(--workspace-paper)] p-3 shadow-lg',
             item.variant === 'error'
               ? 'border-[var(--accent-rust)]'
               : 'border-[var(--workspace-line)]',
@@ -147,7 +146,7 @@ export function Toaster() {
               {item.description}
             </p>
           ) : null}
-          {item.progress != null ? (
+          {item.progress !== null ? (
             <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--workspace-hover)]">
               <div
                 className="h-full rounded-full bg-[var(--accent-teal)] transition-[width] duration-200"
@@ -155,7 +154,7 @@ export function Toaster() {
               />
             </div>
           ) : null}
-        </div>
+        </output>
       ))}
     </div>
   )

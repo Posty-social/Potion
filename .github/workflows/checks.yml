@@ -1,0 +1,68 @@
+name: Checks
+
+# Runs on every pull request, and is called by the Deploy workflow so a push
+# to main only deploys once these pass.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun run test
+
+      - name: Format
+        run: bun run format:check
+
+  # Browser tests against a local dev server and local D1. Reported but not
+  # blocking until they have a track record in CI.
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bun x playwright install --with-deps chromium
+
+      - name: Local database
+        run: |
+          echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .dev.vars
+          bun run db:migrate
+
+      - name: Playwright
+        run: bun run e2e --pass-with-no-tests
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
