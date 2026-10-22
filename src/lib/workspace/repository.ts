@@ -8,6 +8,7 @@ import {
   like,
   or,
   sql,
+  type SQL,
 } from 'drizzle-orm'
 
 import { buildR2AssetKey } from '#/lib/assets/intents'
@@ -27,6 +28,7 @@ import {
   type JsonRecord,
 } from '#/lib/db/schema'
 
+import type { RowCondition } from './cell-values'
 import { createUniqueSlug } from './import'
 import { generateKeyBetween, keyAtEnd } from './ordering'
 import {
@@ -392,6 +394,8 @@ export class WorkspaceRepository {
       includeBodies: boolean
       limit: number
       offset: number
+      // Column filters (see buildRowConditions); applied to rows and counts.
+      where?: RowCondition[]
     },
   ): Promise<{
     database: Omit<WorkspaceDatabase, 'rows'> & {
@@ -402,7 +406,10 @@ export class WorkspaceRepository {
   }> {
     const database = await this.assertDatabaseInOrg(databaseId)
     const properties = (database.schema ?? []) as DatabaseProperty[]
-    const scope = eq(collectionRowTable.collectionId, databaseId)
+    const scope = and(
+      eq(collectionRowTable.collectionId, databaseId),
+      ...(options.where ?? []).map(rowConditionSql),
+    )
 
     const [ownerBlock, views, counts, rows] = await Promise.all([
       this.db.query.block.findFirst({
@@ -460,6 +467,121 @@ export class WorkspaceRepository {
       total: options.includeArchived ? all : all - archivedCount,
       archivedCount,
     }
+  }
+
+  /**
+   * Find rows (cards) whose text cells or body contain `query`, across the
+   * workspace or within one database. Matching is case-insensitive; option
+   * ids and column ids are not searched. Archived rows are skipped unless
+   * `includeArchived`.
+   */
+  async searchRows(input: {
+    query: string
+    databaseId?: string
+    includeArchived: boolean
+    limit: number
+  }): Promise<
+    Array<{
+      rowId: string
+      databaseId: string
+      databaseTitle: string
+      title: string
+      isArchived: boolean
+      matchedIn: string
+      excerpt: string
+    }>
+  > {
+    const needle = input.query.trim().toLowerCase()
+    const term = `%${escapeLike(input.query.trim())}%`
+
+    // A join (row → database → org), so this stays on select(). Cells are
+    // matched only for text-like columns, using the column types from the
+    // database schema, so column ids, option ids and user ids stored in the
+    // JSON never match (a query like "prop" or "add" can't crowd out real
+    // results).
+    const candidates = await this.db
+      .select({
+        id: collectionRowTable.id,
+        databaseId: collectionRowTable.collectionId,
+        values: collectionRowTable.values,
+        body: collectionRowTable.body,
+        isArchived: collectionRowTable.isArchived,
+        databaseTitle: collectionTable.title,
+        schema: collectionTable.schema,
+      })
+      .from(collectionRowTable)
+      .innerJoin(
+        collectionTable,
+        eq(collectionRowTable.collectionId, collectionTable.id),
+      )
+      .where(
+        and(
+          eq(collectionTable.organizationId, this.ctx.organizationId),
+          input.databaseId
+            ? eq(collectionRowTable.collectionId, input.databaseId)
+            : undefined,
+          input.includeArchived
+            ? undefined
+            : eq(collectionRowTable.isArchived, false),
+          or(
+            sql`${collectionRowTable.body} like ${term} escape '\\'`,
+            sql`exists (
+              select 1
+              from json_each(${collectionRowTable.values}) as cell
+              join json_each(${collectionTable.schema}) as col
+                on json_extract(col.value, '$.id') = cell.key
+              where json_extract(col.value, '$.type') in ('title', 'text', 'url', 'email', 'phone')
+                and cell.type = 'text'
+                and cell.value like ${term} escape '\\'
+            )`,
+          ),
+        ),
+      )
+      .orderBy(asc(collectionRowTable.position))
+      .limit(input.limit)
+
+    const excerptOf = (text: string) => {
+      const at = text.toLowerCase().indexOf(needle)
+      const start = Math.max(0, at - 60)
+      const end = Math.min(text.length, at + needle.length + 60)
+      return `${start > 0 ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ')}${end < text.length ? '…' : ''}`
+    }
+
+    const results = []
+    for (const candidate of candidates) {
+      const properties = (candidate.schema ?? []) as DatabaseProperty[]
+      const values = (candidate.values ?? {}) as Record<string, CellValue>
+      const titleId = titlePropertyId(properties)
+      const title = typeof values[titleId] === 'string' ? values[titleId] : ''
+      const textCell = properties.find(
+        (property) =>
+          ['title', 'text', 'url', 'email', 'phone'].includes(property.type) &&
+          typeof values[property.id] === 'string' &&
+          (values[property.id] as string).toLowerCase().includes(needle),
+      )
+      const bodyMatch = candidate.body?.toLowerCase().includes(needle)
+
+      if (!textCell && !bodyMatch) {
+        continue
+      }
+
+      results.push({
+        rowId: candidate.id,
+        databaseId: candidate.databaseId,
+        databaseTitle: candidate.databaseTitle,
+        title: title as string,
+        isArchived: Boolean(candidate.isArchived),
+        matchedIn: textCell ? textCell.name : 'body',
+        excerpt: excerptOf(
+          textCell ? (values[textCell.id] as string) : (candidate.body ?? ''),
+        ),
+      })
+      if (results.length >= input.limit) {
+        break
+      }
+    }
+
+    return results
   }
 
   /** A database's columns without loading its rows (cheap; for validation). */
@@ -1565,36 +1687,39 @@ export class WorkspaceRepository {
     type: Exclude<PropertyType, 'title'>
     options?: Array<string | { name: string; color?: string }>
   }): Promise<{ propertyId: string; options?: PropertyOption[] }> {
-    const properties = await this.readProperties(input.databaseId)
-    const property: DatabaseProperty = {
-      id: newId('prop'),
-      name: input.name.trim() || 'Property',
-      type: input.type,
-    }
-
-    if (OPTION_PROPERTY_TYPES.includes(input.type)) {
-      const options: PropertyOption[] = []
-      for (const entry of input.options ?? []) {
-        const seed = typeof entry === 'string' ? { name: entry } : entry
-        options.push({
-          id: newId('opt'),
-          name: seed.name.trim() || 'Option',
-          color: seed.color ?? nextOptionColor(options),
-        })
-      }
-      property.options = options
-    } else if (input.options?.length) {
+    if (!OPTION_PROPERTY_TYPES.includes(input.type) && input.options?.length) {
       throw new WorkspaceRepositoryError(
         'invalid_input',
         `Only select, multi_select and status columns take options; "${input.type}" does not.`,
       )
     }
 
-    await this.writeProperties(input.databaseId, [...properties, property])
+    return this.mutateProperties(input.databaseId, (properties) => {
+      const property: DatabaseProperty = {
+        id: newId('prop'),
+        name: input.name.trim() || 'Property',
+        type: input.type,
+      }
 
-    return property.options
-      ? { propertyId: property.id, options: property.options }
-      : { propertyId: property.id }
+      if (OPTION_PROPERTY_TYPES.includes(input.type)) {
+        const options: PropertyOption[] = []
+        for (const entry of input.options ?? []) {
+          const seed = typeof entry === 'string' ? { name: entry } : entry
+          options.push({
+            id: newId('opt'),
+            name: seed.name.trim() || 'Option',
+            color: seed.color ?? nextOptionColor(options),
+          })
+        }
+        property.options = options
+      }
+
+      properties.push(property)
+
+      return property.options
+        ? { propertyId: property.id, options: property.options }
+        : { propertyId: property.id }
+    })
   }
 
   async updateProperty(input: {
@@ -1603,28 +1728,31 @@ export class WorkspaceRepository {
     name?: string
     type?: Exclude<PropertyType, 'title'>
   }): Promise<void> {
-    const properties = await this.readProperties(input.databaseId)
-    const property = findColumn(properties, input.databaseId, input.propertyId)
-
-    if (property.type === 'title' && input.type) {
-      throw new WorkspaceRepositoryError(
-        'invalid_input',
-        'The title property type cannot be changed.',
+    await this.mutateProperties(input.databaseId, (properties) => {
+      const property = findColumn(
+        properties,
+        input.databaseId,
+        input.propertyId,
       )
-    }
 
-    if (input.name !== undefined) {
-      property.name = input.name.trim() || 'Property'
-    }
+      if (property.type === 'title' && input.type) {
+        throw new WorkspaceRepositoryError(
+          'invalid_input',
+          'The title property type cannot be changed.',
+        )
+      }
 
-    if (input.type !== undefined && input.type !== property.type) {
-      property.type = input.type
-      property.options = OPTION_PROPERTY_TYPES.includes(input.type)
-        ? (property.options ?? [])
-        : undefined
-    }
+      if (input.name !== undefined) {
+        property.name = input.name.trim() || 'Property'
+      }
 
-    await this.writeProperties(input.databaseId, properties)
+      if (input.type !== undefined && input.type !== property.type) {
+        property.type = input.type
+        property.options = OPTION_PROPERTY_TYPES.includes(input.type)
+          ? (property.options ?? [])
+          : undefined
+      }
+    })
 
     return
   }
@@ -1633,21 +1761,31 @@ export class WorkspaceRepository {
     databaseId: string
     propertyId: string
   }): Promise<void> {
-    const properties = await this.readProperties(input.databaseId)
-    const property = properties.find((p) => p.id === input.propertyId)
+    await this.mutateProperties(input.databaseId, (properties) => {
+      const index = properties.findIndex((p) => p.id === input.propertyId)
 
-    if (property?.type === 'title') {
-      throw new WorkspaceRepositoryError(
-        'invalid_input',
-        'The title property cannot be deleted.',
+      if (properties[index]?.type === 'title') {
+        throw new WorkspaceRepositoryError(
+          'invalid_input',
+          'The title property cannot be deleted.',
+        )
+      }
+      if (index !== -1) {
+        properties.splice(index, 1)
+      }
+    })
+
+    // One atomic UPDATE: drop the key from every row that has it.
+    const path = jsonPath(input.propertyId)
+    await this.db
+      .update(collectionRowTable)
+      .set({ values: sql`json_remove(${collectionRowTable.values}, ${path})` })
+      .where(
+        and(
+          eq(collectionRowTable.collectionId, input.databaseId),
+          sql`json_type(${collectionRowTable.values}, ${path}) is not null`,
+        ),
       )
-    }
-
-    await this.writeProperties(
-      input.databaseId,
-      properties.filter((p) => p.id !== input.propertyId),
-    )
-    await this.stripValueFromRows(input.databaseId, input.propertyId)
 
     return
   }
@@ -1659,24 +1797,22 @@ export class WorkspaceRepository {
     // A palette hex; omitted picks the first colour no option uses yet.
     color?: string
   }): Promise<{ optionId: string; option: PropertyOption }> {
-    const properties = await this.readProperties(input.databaseId)
-    const property = findOptionColumn(
-      properties,
-      input.databaseId,
-      input.propertyId,
-    )
+    return this.mutateProperties(input.databaseId, (properties) => {
+      const property = findOptionColumn(
+        properties,
+        input.databaseId,
+        input.propertyId,
+      )
+      const options = property.options ?? []
+      const option: PropertyOption = {
+        id: newId('opt'),
+        name: input.name.trim() || 'Option',
+        color: input.color ?? nextOptionColor(options),
+      }
+      property.options = [...options, option]
 
-    const options = property.options ?? []
-    const option: PropertyOption = {
-      id: newId('opt'),
-      name: input.name.trim() || 'Option',
-      color: input.color ?? nextOptionColor(options),
-    }
-    property.options = [...options, option]
-
-    await this.writeProperties(input.databaseId, properties)
-
-    return { optionId: option.id, option }
+      return { optionId: option.id, option }
+    })
   }
 
   /** Rename and/or recolour a database column option. */
@@ -1687,23 +1823,23 @@ export class WorkspaceRepository {
     name?: string
     color?: string
   }): Promise<{ option: PropertyOption }> {
-    const properties = await this.readProperties(input.databaseId)
-    const property = findOptionColumn(
-      properties,
-      input.databaseId,
-      input.propertyId,
-    )
-    const option = findOption(property, input.optionId)
+    return this.mutateProperties(input.databaseId, (properties) => {
+      const property = findOptionColumn(
+        properties,
+        input.databaseId,
+        input.propertyId,
+      )
+      const option = findOption(property, input.optionId)
 
-    if (input.name !== undefined) {
-      option.name = input.name.trim() || 'Option'
-    }
-    if (input.color !== undefined) {
-      option.color = input.color
-    }
-    await this.writeProperties(input.databaseId, properties)
+      if (input.name !== undefined) {
+        option.name = input.name.trim() || 'Option'
+      }
+      if (input.color !== undefined) {
+        option.color = input.color
+      }
 
-    return { option }
+      return { option }
+    })
   }
 
   async renamePropertyOption(input: {
@@ -1722,48 +1858,59 @@ export class WorkspaceRepository {
     propertyId: string
     optionId: string
   }): Promise<{ clearedRowCount: number }> {
-    const properties = await this.readProperties(input.databaseId)
-    const property = findOptionColumn(
-      properties,
-      input.databaseId,
-      input.propertyId,
-    )
-    findOption(property, input.optionId)
-
-    property.options = (property.options ?? []).filter(
-      (o) => o.id !== input.optionId,
-    )
-    await this.writeProperties(input.databaseId, properties)
-
-    // Clear the removed option from every row's value.
-    const rows = await this.db.query.collectionRow.findMany({
-      where: eq(collectionRowTable.collectionId, input.databaseId),
+    await this.mutateProperties(input.databaseId, (properties) => {
+      const property = findOptionColumn(
+        properties,
+        input.databaseId,
+        input.propertyId,
+      )
+      findOption(property, input.optionId)
+      property.options = (property.options ?? []).filter(
+        (o) => o.id !== input.optionId,
+      )
     })
 
-    const results = await Promise.all(
-      rows.map(async (row) => {
-        const values = { ...row.values } as Record<string, CellValue>
-        const current = values[input.propertyId]
+    // Clear the removed option from rows with single-statement updates that
+    // only touch this one key, so concurrent edits to other cells survive.
+    const values = collectionRowTable.values
+    const path = jsonPath(input.propertyId)
+    const inDatabase = eq(collectionRowTable.collectionId, input.databaseId)
+    const now = new Date()
 
-        if (current === input.optionId) {
-          values[input.propertyId] = null
-        } else if (Array.isArray(current) && current.includes(input.optionId)) {
-          values[input.propertyId] = current.filter(
-            (id) => id !== input.optionId,
-          )
-        } else {
-          return false
-        }
+    const [single, multi] = await Promise.all([
+      // select / status: the cell is the option id → null.
+      this.db
+        .update(collectionRowTable)
+        .set({
+          values: sql`json_set(${values}, ${path}, json('null'))`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            inDatabase,
+            sql`json_type(${values}, ${path}) = 'text'`,
+            sql`json_extract(${values}, ${path}) = ${input.optionId}`,
+          ),
+        )
+        .returning({ id: collectionRowTable.id }),
+      // multi_select: drop the id from the array.
+      this.db
+        .update(collectionRowTable)
+        .set({
+          values: sql`json_set(${values}, ${path}, json((select json_group_array(value) from json_each(${values}, ${path}) where value != ${input.optionId})))`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            inDatabase,
+            sql`json_type(${values}, ${path}) = 'array'`,
+            sql`exists (select 1 from json_each(${values}, ${path}) where value = ${input.optionId})`,
+          ),
+        )
+        .returning({ id: collectionRowTable.id }),
+    ])
 
-        await this.db
-          .update(collectionRowTable)
-          .set({ values: values as JsonRecord, updatedAt: new Date() })
-          .where(eq(collectionRowTable.id, row.id))
-        return true
-      }),
-    )
-
-    return { clearedRowCount: results.filter(Boolean).length }
+    return { clearedRowCount: single.length + multi.length }
   }
 
   // --- Rows --------------------------------------------------------------
@@ -1799,27 +1946,48 @@ export class WorkspaceRepository {
     return { rowId }
   }
 
+  /**
+   * Merge cell values into a row. Only the given keys are written, inside a
+   * single UPDATE (json_set), so concurrent edits to other cells of the same
+   * row are never lost. Pass `expectedVersion` to fail with version_conflict
+   * if the row changed since it was read.
+   */
   async updateRow(input: {
     rowId: string
     values: Record<string, CellValue>
-  }): Promise<void> {
+    expectedVersion?: number
+  }): Promise<{ version: number }> {
     const row = await this.assertRowInOrg(input.rowId)
-    const merged = {
-      ...((row.values ?? {}) as Record<string, CellValue>),
-      ...input.values,
-    }
 
-    await this.db
+    const [updated] = await this.db
       .update(collectionRowTable)
       .set({
-        values: merged as JsonRecord,
+        values: jsonSetValues(collectionRowTable.values, input.values),
+        version: sql`${collectionRowTable.version} + 1`,
         updatedAt: new Date(),
         lastEditedByUserId: this.ctx.userId,
       })
-      .where(eq(collectionRowTable.id, row.id))
+      .where(
+        and(
+          eq(collectionRowTable.id, row.id),
+          input.expectedVersion === undefined
+            ? undefined
+            : eq(collectionRowTable.version, input.expectedVersion),
+        ),
+      )
+      .returning({ version: collectionRowTable.version })
+
+    if (!updated) {
+      const current = await this.assertRowInOrg(input.rowId)
+      throw new WorkspaceRepositoryError(
+        'version_conflict',
+        `Row "${row.id}" has changed (you sent version ${input.expectedVersion}, current is ${current.version}). Re-read it with read_row and retry.`,
+      )
+    }
+
     await this.notifyDatabase(row.collectionId)
 
-    return
+    return { version: updated.version }
   }
 
   async updateRowBody(input: { rowId: string; body: string }): Promise<void> {
@@ -1912,6 +2080,27 @@ export class WorkspaceRepository {
   // --- Assets ------------------------------------------------------------
 
   /**
+   * Record an uploaded file as belonging to this workspace. Serving checks
+   * this before handing out the file, and the scheduled cleanup uses it to
+   * find uploads nothing references any more.
+   */
+  async recordAsset(input: {
+    assetId: string
+    key: string
+    mime: string
+    sizeBytes: number
+  }): Promise<void> {
+    await this.db.insert(assetTable).values({
+      id: input.assetId,
+      organizationId: this.ctx.organizationId,
+      r2Key: input.key,
+      mime: input.mime,
+      sizeBytes: input.sizeBytes,
+      uploadedByUserId: this.ctx.userId,
+    })
+  }
+
+  /**
    * Store an already-validated upload in R2 under `assets/<assetId>/<file>`
    * and record it in the asset table for this workspace. Returns the app path
    * (`/api/assets/…`) that image blocks and Markdown bodies reference.
@@ -1940,13 +2129,11 @@ export class WorkspaceRepository {
     await this.assets.put(key, input.bytes, {
       httpMetadata: { contentType: input.mime },
     })
-    await this.db.insert(assetTable).values({
-      id: assetId,
-      organizationId: this.ctx.organizationId,
-      r2Key: key,
+    await this.recordAsset({
+      assetId,
+      key,
       mime: input.mime,
       sizeBytes: input.bytes.byteLength,
-      uploadedByUserId: this.ctx.userId,
     })
 
     return {
@@ -2097,52 +2284,63 @@ export class WorkspaceRepository {
     return databaseId
   }
 
-  private async readProperties(
+  /**
+   * Change a database's columns safely under concurrency: read the schema,
+   * apply `mutate` to a copy, and write it back only if nobody else wrote
+   * since the read (compare-and-swap on updated_at), retrying with backoff.
+   * Two agents adding options at once therefore both keep their option.
+   */
+  private async mutateProperties<T>(
     databaseId: string,
-  ): Promise<DatabaseProperty[]> {
-    const database = await this.assertDatabaseInOrg(databaseId)
+    mutate: (properties: DatabaseProperty[]) => T,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < MAX_SCHEMA_WRITE_ATTEMPTS; attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- each retry re-reads
+      const database = await this.assertDatabaseInOrg(databaseId)
+      const properties = ((database.schema ?? []) as DatabaseProperty[]).map(
+        (property) =>
+          Object.assign({}, property, {
+            options: property.options?.map((option) =>
+              Object.assign({}, option),
+            ),
+          }),
+      )
+      const result = mutate(properties)
+      const readAt = database.updatedAt
+      // Always move updated_at forward, even within the same millisecond, so
+      // a concurrent writer that read the same version can't also match.
+      const writtenAt = new Date(Math.max(Date.now(), readAt.getTime() + 1))
 
-    return ((database.schema ?? []) as DatabaseProperty[]).map((property) => ({
-      ...property,
-      options: property.options?.map((option) => ({ ...option })),
-    }))
-  }
+      // oxlint-disable-next-line no-await-in-loop -- each retry re-reads
+      const written = await this.db
+        .update(collectionTable)
+        .set({
+          schema: properties as DbCollectionField[],
+          updatedAt: writtenAt,
+        })
+        .where(
+          and(
+            eq(collectionTable.id, databaseId),
+            eq(collectionTable.updatedAt, readAt),
+          ),
+        )
+        .returning({ id: collectionTable.id })
 
-  private async writeProperties(
-    databaseId: string,
-    properties: DatabaseProperty[],
-  ): Promise<void> {
-    await this.db
-      .update(collectionTable)
-      .set({ schema: properties as DbCollectionField[], updatedAt: new Date() })
-      .where(eq(collectionTable.id, databaseId))
-    await this.notifyDatabase(databaseId)
-  }
+      if (written.length > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- returns right after
+        await this.notifyDatabase(databaseId)
+        return result
+      }
 
-  private async stripValueFromRows(
-    databaseId: string,
-    propertyId: string,
-  ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(collectionRowTable)
-      .where(eq(collectionRowTable.collectionId, databaseId))
+      // oxlint-disable-next-line no-await-in-loop -- backoff before retrying
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5 + Math.random() * 20 * (attempt + 1)),
+      )
+    }
 
-    await Promise.all(
-      rows.map((row) => {
-        const values = { ...row.values } as Record<string, CellValue>
-
-        if (!(propertyId in values)) {
-          return Promise.resolve()
-        }
-
-        delete values[propertyId]
-
-        return this.db
-          .update(collectionRowTable)
-          .set({ values: values as JsonRecord, updatedAt: new Date() })
-          .where(eq(collectionRowTable.id, row.id))
-      }),
+    throw new WorkspaceRepositoryError(
+      'version_conflict',
+      `Database "${databaseId}" columns kept changing while saving; re-read it and retry.`,
     )
   }
 
@@ -2300,6 +2498,88 @@ export class WorkspaceRepository {
   }
 }
 
+// Enough for many simultaneous writers on one database (each retry loses to
+// at most one other write), with a short random backoff between attempts.
+const MAX_SCHEMA_WRITE_ATTEMPTS = 8
+
+/**
+ * SQLite JSON path for a top-level key of a row's `values`. Keys are column
+ * ids (`prop_<uuid>`); anything else is rejected rather than escaped.
+ */
+function jsonPath(key: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+    throw new WorkspaceRepositoryError(
+      'invalid_input',
+      `"${key}" is not a valid column id.`,
+    )
+  }
+  return `$."${key}"`
+}
+
+/** Escape LIKE wildcards; pair with `escape '\\'` in the SQL. */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`)
+}
+
+/** A filter value as SQLite sees it: JSON booleans come back as 1/0. */
+function bindFilterValue(value: string | number | boolean) {
+  return typeof value === 'boolean' ? (value ? 1 : 0) : value
+}
+
+/** OR together alternatives; no alternatives matches nothing. */
+function anyOf(parts: SQL[]): SQL {
+  return parts.length > 0 ? sql`(${sql.join(parts, sql` or `)})` : sql`0`
+}
+
+/** SQL for one `where` condition on a row's `values` JSON. */
+function rowConditionSql(condition: RowCondition): SQL {
+  const values = collectionRowTable.values
+  const path = jsonPath(condition.propertyId)
+
+  switch (condition.mode) {
+    case 'empty':
+      return sql`coalesce(json_extract(${values}, ${path}), '') in ('', '[]')`
+    case 'contains':
+      return anyOf(
+        condition.values.map(
+          (value) =>
+            sql`json_extract(${values}, ${path}) like ${`%${escapeLike(String(value))}%`} escape '\\'`,
+        ),
+      )
+    case 'includes':
+      // json_each also handles legacy single-string person cells.
+      return anyOf(
+        condition.values.map(
+          (value) =>
+            sql`exists (select 1 from json_each(${values}, ${path}) where value = ${bindFilterValue(value)})`,
+        ),
+      )
+    default:
+      return anyOf(
+        condition.values.map(
+          (value) =>
+            sql`json_extract(${values}, ${path}) = ${bindFilterValue(value)}`,
+        ),
+      )
+  }
+}
+
+/** `json_set(values, '$."k"', json(v), …)` for a partial cell update. */
+function jsonSetValues(
+  column: typeof collectionRowTable.values,
+  values: Record<string, CellValue>,
+): SQL {
+  const entries = Object.entries(values)
+  if (entries.length === 0) {
+    return sql`${column}`
+  }
+  const pairs = entries.map(
+    ([key, value]) =>
+      sql`${jsonPath(key)}, json(${JSON.stringify(value ?? null)})`,
+  )
+  return sql`json_set(coalesce(${column}, '{}'), ${sql.join(pairs, sql`, `)})`
+}
+
 /** A database column by id, or a `property_not_found` error naming it. */
 function findColumn(
   properties: DatabaseProperty[],
@@ -2413,6 +2693,7 @@ function toDatabaseRow(
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     pageId: row.pageId ?? null,
+    version: row.version,
     isArchived: Boolean(row.isArchived),
     archivedAt: row.archivedAt ? toIso(row.archivedAt) : null,
   }

@@ -11,6 +11,10 @@
   "observability": {
     "enabled": true,
   },
+  // Daily at 03:17 UTC: delete uploads nothing references (src/server.ts).
+  "triggers": {
+    "crons": ["17 3 * * *"],
+  },
   "upload_source_maps": true,
   /**
    * Smart Placement

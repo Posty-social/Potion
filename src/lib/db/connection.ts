@@ -46,11 +46,15 @@ export function createDb(database: D1Database): AppDatabase {
  *
  * @see https://developers.cloudflare.com/d1/best-practices/read-replication/#use-sessions-api
  */
-export function createSessionDb(database: D1Database): AppDatabase {
-  return drizzle(
-    database.withSession('first-unconstrained') as unknown as D1Database,
-    { schema },
-  )
+export function createSessionDb(
+  database: D1Database,
+  // 'first-primary' for work that must see the latest writes (e.g. the
+  // cleanup cron deciding a file is unused).
+  constraint: 'first-unconstrained' | 'first-primary' = 'first-unconstrained',
+): AppDatabase {
+  return drizzle(database.withSession(constraint) as unknown as D1Database, {
+    schema,
+  })
 }
 
 const sessionStorage = new AsyncLocalStorage<AppDatabase>()

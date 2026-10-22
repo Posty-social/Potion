@@ -95,6 +95,8 @@ export type DatabaseRow = {
   createdAt: string
   updatedAt: string
   pageId: string | null
+  /** Bumped on every cell write; pass as update_row `expectedVersion`. */
+  version: number
   /** Archived rows are hidden from views by default; archiving is reversible. */
   isArchived: boolean
   /** ISO timestamp of when the row was archived, or null. */

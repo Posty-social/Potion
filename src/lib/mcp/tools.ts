@@ -2,8 +2,10 @@ import { z, ZodError } from 'zod'
 
 import {
   CellValueError,
+  buildRowConditions,
   normalizeCellValue,
   normalizeRowValues,
+  valuesByName,
   type MemberRef,
 } from '#/lib/workspace/cell-values'
 import {
@@ -38,6 +40,7 @@ import {
   updatePropertySchema,
   updateRowBodySchema,
 } from '#/lib/workspace/schemas'
+import type { CellValue, DatabaseProperty } from '#/lib/workspace/types'
 
 import { prepareAssetUpload, uploadAssetInputSchema } from './assets'
 
@@ -48,6 +51,7 @@ export type McpRepository = Pick<
   | 'searchPages'
   | 'getPageForAgent'
   | 'getDatabaseRowsPage'
+  | 'searchRows'
   | 'createPage'
   | 'renamePage'
   | 'setPageIcon'
@@ -114,6 +118,7 @@ const mcpToolNames = [
   'remove_property_option',
   'list_members',
   'read_row',
+  'search_rows',
   'archive_row',
   'unarchive_row',
   'add_database_option',
@@ -169,14 +174,30 @@ const MAX_ROW_LIMIT = 500
 // database; read_database pages through the rest.
 const PAGE_ROW_PREVIEW_LIMIT = 50
 const mcpId = z.string().min(1).max(120)
+const valueFormatSchema = z.enum(['ids', 'names']).optional()
 const readDatabaseInputSchema = z.object({
   databaseId: mcpId,
   includeArchived: z.boolean().optional(),
   includeBodies: z.boolean().optional(),
   limit: z.number().int().min(1).max(MAX_ROW_LIMIT).optional(),
   offset: z.number().int().min(0).optional(),
+  where: z.record(z.string(), z.unknown()).optional(),
+  valueFormat: valueFormatSchema,
 })
-const readRowInputSchema = z.object({ rowId: mcpId })
+const readRowInputSchema = z.object({
+  rowId: mcpId,
+  valueFormat: valueFormatSchema,
+})
+const readPageInputSchema = getPageSchema.extend({
+  valueFormat: valueFormatSchema,
+})
+const DEFAULT_ROW_SEARCH_LIMIT = 20
+const searchRowsInputSchema = z.object({
+  query: z.string().trim().min(1).max(200),
+  databaseId: mcpId.optional(),
+  includeArchived: z.boolean().optional(),
+  limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
+})
 const rowValuesInputSchema = z.record(z.string(), z.unknown())
 const addRowInputSchema = z.object({
   databaseId: mcpId,
@@ -186,6 +207,7 @@ const addRowInputSchema = z.object({
 const updateRowInputSchema = z.object({
   rowId: mcpId,
   values: rowValuesInputSchema,
+  expectedVersion: z.number().int().min(1).optional(),
 })
 const archiveRowInputSchema = z
   .object({
@@ -288,7 +310,16 @@ export const mcpToolDefinitions = [
     annotations: { title: 'Read page', readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { slug: { type: 'string' }, ...workspaceIdProperty },
+      properties: {
+        slug: { type: 'string' },
+        valueFormat: {
+          type: 'string',
+          enum: ['ids', 'names'],
+          description:
+            '"ids" (default) returns cells keyed by column id with option/user ids. "names" returns them keyed by column name with option names, people as { id, name, email }, and url cells as lists — the same names add_row/update_row accept.',
+        },
+        ...workspaceIdProperty,
+      },
       required: ['slug'],
       additionalProperties: false,
     },
@@ -319,6 +350,18 @@ export const mcpToolDefinitions = [
           type: 'integer',
           minimum: 0,
           description: 'Rows to skip (default 0).',
+        },
+        where: {
+          type: 'object',
+          additionalProperties: true,
+          description:
+            'Filter rows. Keys are column ids or names; each value is a value, a list of alternatives, or null for "empty". Option names, member emails and ISO dates work as in add_row; text, url, email and phone columns match by case-insensitive "contains". All keys must match, e.g. { "Status": "Done", "Owner": "ada@posty.social" }.',
+        },
+        valueFormat: {
+          type: 'string',
+          enum: ['ids', 'names'],
+          description:
+            '"ids" (default) returns cells keyed by column id with option/user ids. "names" returns them keyed by column name with option names, people as { id, name, email }, and url cells as lists — the same names add_row/update_row accept.',
         },
         ...workspaceIdProperty,
       },
@@ -504,6 +547,12 @@ export const mcpToolDefinitions = [
       properties: {
         rowId: { type: 'string' },
         values: { type: 'object', additionalProperties: true },
+        expectedVersion: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            "Optional: the row `version` you last read. The update fails with a version conflict if the row has changed since, instead of overwriting someone else's edit. Only the given cells are written either way.",
+        },
         ...workspaceIdProperty,
       },
       required: ['rowId', 'values'],
@@ -786,8 +835,43 @@ export const mcpToolDefinitions = [
     annotations: { title: 'Read database row', readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { rowId: { type: 'string' }, ...workspaceIdProperty },
+      properties: {
+        rowId: { type: 'string' },
+        valueFormat: {
+          type: 'string',
+          enum: ['ids', 'names'],
+          description:
+            '"ids" (default) returns cells keyed by column id with option/user ids. "names" returns them keyed by column name with option names, people as { id, name, email }, and url cells as lists — the same names add_row/update_row accept.',
+        },
+        ...workspaceIdProperty,
+      },
       required: ['rowId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_rows',
+    description:
+      'Find database rows (cards) by text: matches title, text, url, email and phone cells and the row body, case-insensitively, across the workspace or within one database. Returns row and database ids, the title, where it matched and an excerpt. Archived rows are skipped unless includeArchived is true. To filter by status, owner or date use read_database `where`.',
+    annotations: { title: 'Search database rows', readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', maxLength: 200 },
+        databaseId: {
+          type: 'string',
+          description: 'Optional: only search this database.',
+        },
+        includeArchived: { type: 'boolean' },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_SEARCH_LIMIT,
+          description: `Max results (default ${DEFAULT_ROW_SEARCH_LIMIT}).`,
+        },
+        ...workspaceIdProperty,
+      },
+      required: ['query'],
       additionalProperties: false,
     },
   },
@@ -1197,7 +1281,7 @@ export async function callMcpTool(
   }
 
   if (tool === 'read_page') {
-    const data = getPageSchema.parse(rest ?? {})
+    const data = readPageInputSchema.parse(rest ?? {})
     const page = await repository.getPageForAgent(
       data.slug,
       PAGE_ROW_PREVIEW_LIMIT,
@@ -1207,26 +1291,93 @@ export async function callMcpTool(
       throw pageSlugNotFound(data.slug)
     }
 
-    return toolResult({ page: stripBodies(page) })
+    const light = stripBodies(page)
+    if (data.valueFormat !== 'names') {
+      return toolResult({ page: light })
+    }
+    const members = await membersFor(
+      repository,
+      page.databases.flatMap((database) => database.properties),
+    )
+    return toolResult({
+      page: {
+        ...light,
+        databases: light.databases.map((database) =>
+          Object.assign({}, database, {
+            rows: database.rows.map((row) =>
+              withReadableValues(row, database.properties, members),
+            ),
+          }),
+        ),
+      },
+    })
   }
 
   if (tool === 'read_database') {
     const data = readDatabaseInputSchema.parse(rest ?? {})
+    const where = data.where ?? {}
+    const schema =
+      Object.keys(where).length > 0 || data.valueFormat === 'names'
+        ? await repository.getDatabaseSchema(data.databaseId)
+        : null
+    const members =
+      schema &&
+      (data.valueFormat === 'names' || touchesPerson(schema.properties, where))
+        ? await repository.listMembers()
+        : []
+    const conditions = schema
+      ? buildRowConditions({
+          databaseId: data.databaseId,
+          properties: schema.properties,
+          where,
+          members,
+        })
+      : []
     const result = await repository.getDatabaseRowsPage(data.databaseId, {
       includeArchived: data.includeArchived ?? false,
       includeBodies: data.includeBodies ?? false,
       limit: data.limit ?? DEFAULT_ROW_LIMIT,
       offset: data.offset ?? 0,
+      where: conditions,
     })
+    const response = readDatabaseResult(result, data)
 
-    return toolResult(readDatabaseResult(result, data))
+    if (data.valueFormat !== 'names') {
+      return toolResult(response)
+    }
+    return toolResult({
+      ...response,
+      database: {
+        ...response.database,
+        rows: response.database.rows.map((row) =>
+          withReadableValues(row, result.database.properties, members),
+        ),
+      },
+    })
   }
 
   if (tool === 'read_row') {
     const data = readRowInputSchema.parse(rest ?? {})
     const row = await repository.getRow(data.rowId)
 
-    return toolResult({ row })
+    if (data.valueFormat !== 'names') {
+      return toolResult({ row })
+    }
+    const { properties } = await repository.getDatabaseSchema(row.databaseId)
+    const members = await membersFor(repository, properties)
+    return toolResult({ row: withReadableValues(row, properties, members) })
+  }
+
+  if (tool === 'search_rows') {
+    const data = searchRowsInputSchema.parse(rest ?? {})
+    const rows = await repository.searchRows({
+      query: data.query,
+      databaseId: data.databaseId,
+      includeArchived: data.includeArchived ?? false,
+      limit: data.limit ?? DEFAULT_ROW_SEARCH_LIMIT,
+    })
+
+    return toolResult({ rows })
   }
 
   if (tool === 'list_members') {
@@ -1315,9 +1466,13 @@ export async function callMcpTool(
       current.databaseId,
       data.values,
     )
-    await repository.updateRow({ rowId: data.rowId, values })
+    const { version } = await repository.updateRow({
+      rowId: data.rowId,
+      values,
+      expectedVersion: data.expectedVersion,
+    })
 
-    return toolResult({ row: { rowId: data.rowId, values } })
+    return toolResult({ row: { rowId: data.rowId, values, version } })
   }
 
   if (tool === 'archive_row' || tool === 'unarchive_row') {
@@ -1582,6 +1737,45 @@ function readDatabaseResult(
   }
 }
 
+/** Members, loaded only when some column is a person column. */
+async function membersFor(
+  repository: McpRepository,
+  properties: DatabaseProperty[],
+): Promise<MemberRef[]> {
+  return properties.some((property) => property.type === 'person')
+    ? repository.listMembers()
+    : []
+}
+
+/** True if a values/where map names a person column (by id or name). */
+function touchesPerson(
+  properties: DatabaseProperty[],
+  map: Record<string, unknown>,
+): boolean {
+  return Object.keys(map).some((key) =>
+    properties.some(
+      (property) =>
+        property.type === 'person' &&
+        (property.id === key ||
+          property.name.trim().toLowerCase() === key.trim().toLowerCase()),
+    ),
+  )
+}
+
+/** A row with `values` keyed by column name with readable values. */
+function withReadableValues<
+  T extends {
+    values: Record<string, CellValue>
+    createdAt: string
+    updatedAt: string
+  },
+>(row: T, properties: DatabaseProperty[], members: MemberRef[]) {
+  return {
+    ...row,
+    values: valuesByName({ properties, row, members }),
+  }
+}
+
 /**
  * Validate and normalize agent-supplied cell values against the database's
  * columns (names → ids, option names → ids, emails → user ids, ISO dates,
@@ -1593,15 +1787,7 @@ async function normalizeValuesFor(
   values: Record<string, unknown>,
 ) {
   const schema = await repository.getDatabaseSchema(databaseId)
-  const touchesPerson = Object.keys(values).some((key) =>
-    schema.properties.some(
-      (property) =>
-        property.type === 'person' &&
-        (property.id === key ||
-          property.name.trim().toLowerCase() === key.trim().toLowerCase()),
-    ),
-  )
-  const members: MemberRef[] = touchesPerson
+  const members: MemberRef[] = touchesPerson(schema.properties, values)
     ? await repository.listMembers()
     : []
 
