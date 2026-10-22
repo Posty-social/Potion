@@ -64,7 +64,7 @@ export const Route = createFileRoute('/mcp')({
                 if (!memberships.some((w) => w.id === workspaceId)) {
                   throw new WorkspaceRepositoryError(
                     'invalid_input',
-                    'You are not a member of that workspace.',
+                    `You are not a member of workspace "${workspaceId}" (call list_workspaces for valid ids).`,
                   )
                 }
                 return createWorkspaceRepository(

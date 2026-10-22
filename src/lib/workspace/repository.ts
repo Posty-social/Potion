@@ -1,7 +1,9 @@
 import { and, asc, eq, inArray, isNull, like, or } from 'drizzle-orm'
 
+import { buildR2AssetKey } from '#/lib/assets/intents'
 import type { AppDatabase } from '#/lib/db/connection'
 import {
+  asset as assetTable,
   block as blockTable,
   collection as collectionTable,
   collectionRow as collectionRowTable,
@@ -20,8 +22,10 @@ import { generateKeyBetween, keyAtEnd } from './ordering'
 import {
   FIELD_OPTION_COLORS,
   OPTION_PROPERTY_TYPES,
+  nextOptionColor,
   type CellValue,
   type DatabaseProperty,
+  type DatabaseRow,
   type DatabaseView,
   type DatabaseViewType,
   type PropertyOption,
@@ -40,6 +44,7 @@ type WorkspaceRepositoryErrorCode =
   | 'view_not_found'
   | 'property_not_found'
   | 'row_not_found'
+  | 'option_not_found'
   | 'version_conflict'
   | 'invalid_input'
 
@@ -307,6 +312,31 @@ export class WorkspaceRepository {
     return database ?? null
   }
 
+  /** A database's columns without loading its rows (cheap; for validation). */
+  async getDatabaseSchema(databaseId: string): Promise<{
+    id: string
+    title: string
+    titlePropertyId: string
+    properties: DatabaseProperty[]
+  }> {
+    const database = await this.assertDatabaseInOrg(databaseId)
+    const properties = (database.schema ?? []) as DatabaseProperty[]
+
+    return {
+      id: database.id,
+      title: database.title,
+      titlePropertyId: titlePropertyId(properties),
+      properties,
+    }
+  }
+
+  /** One row (with its body) and the database it belongs to. */
+  async getRow(rowId: string): Promise<DatabaseRow & { databaseId: string }> {
+    const row = await this.assertRowInOrg(rowId)
+
+    return { ...toDatabaseRow(row), databaseId: row.collectionId }
+  }
+
   private async assemblePage(
     pageRow: typeof pageTable.$inferSelect,
   ): Promise<WorkspacePage> {
@@ -399,15 +429,7 @@ export class WorkspaceRepository {
           title: collection.title,
           titlePropertyId: titlePropertyId(properties),
           properties,
-          rows: (rowsByDb.get(collection.id) ?? []).map((row) => ({
-            id: row.id,
-            position: row.position,
-            values: (row.values ?? {}) as Record<string, CellValue>,
-            body: row.body ?? null,
-            createdAt: toIso(row.createdAt),
-            updatedAt: toIso(row.updatedAt),
-            pageId: row.pageId ?? null,
-          })),
+          rows: (rowsByDb.get(collection.id) ?? []).map(toDatabaseRow),
           views: (viewsByDb.get(collection.id) ?? []).map((view) =>
             toDatabaseView(view, properties),
           ),
@@ -526,13 +548,15 @@ export class WorkspaceRepository {
 
   /** Workspace members, for `person` properties (tag a user by id). */
   async listMembers(): Promise<
-    Array<{ userId: string; name: string; email: string }>
+    Array<{ userId: string; name: string; email: string; role: string }>
   > {
+    // A join, so this stays on select() (no drizzle relations are defined).
     const rows = await this.db
       .select({
         userId: memberTable.userId,
         name: userTable.name,
         email: userTable.email,
+        role: memberTable.role,
       })
       .from(memberTable)
       .innerJoin(userTable, eq(memberTable.userId, userTable.id))
@@ -762,8 +786,8 @@ export class WorkspaceRepository {
 
     if (!OPTION_PROPERTY_TYPES.includes(row.type as PropertyType)) {
       throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option property not found.',
+        'invalid_input',
+        `Page property "${row.name}" (${row.id}) is a ${row.type} property; only select, multi_select and status properties have options.`,
       )
     }
 
@@ -771,7 +795,7 @@ export class WorkspaceRepository {
     const option: PropertyOption = {
       id: input.optionId ?? newId('opt'),
       name: input.name.trim() || 'Option',
-      color: pickColor(options.length),
+      color: nextOptionColor(options),
     }
 
     await this.writeCatalogOptions(input.propertyId, [...options, option])
@@ -806,8 +830,8 @@ export class WorkspaceRepository {
 
     if (!options.some((option) => option.id === input.optionId)) {
       throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option not found.',
+        'option_not_found',
+        `Option "${input.optionId}" was not found on page property "${row.name}" (${row.id}).`,
       )
     }
 
@@ -876,7 +900,7 @@ export class WorkspaceRepository {
     if (!row) {
       throw new WorkspaceRepositoryError(
         'property_not_found',
-        'Property not found.',
+        `Page property "${propertyId}" was not found in the workspace property catalog. Database columns are managed with the *_database_* tools.`,
       )
     }
 
@@ -1045,14 +1069,14 @@ export class WorkspaceRepository {
     if (!block) {
       throw new WorkspaceRepositoryError(
         'block_not_found',
-        'Workspace block was not found.',
+        `Block "${input.blockId}" was not found on page "${page.id}".`,
       )
     }
 
     if (input.version !== block.version) {
       throw new WorkspaceRepositoryError(
         'version_conflict',
-        'Workspace block has changed since it was loaded.',
+        `Block "${block.id}" has changed since it was loaded (you sent version ${input.version}, current is ${block.version}). Re-read the page and retry.`,
       )
     }
 
@@ -1386,7 +1410,8 @@ export class WorkspaceRepository {
     databaseId: string
     name: string
     type: Exclude<PropertyType, 'title'>
-  }): Promise<{ propertyId: string }> {
+    options?: Array<string | { name: string; color?: string }>
+  }): Promise<{ propertyId: string; options?: PropertyOption[] }> {
     const properties = await this.readProperties(input.databaseId)
     const property: DatabaseProperty = {
       id: newId('prop'),
@@ -1395,12 +1420,28 @@ export class WorkspaceRepository {
     }
 
     if (OPTION_PROPERTY_TYPES.includes(input.type)) {
-      property.options = []
+      const options: PropertyOption[] = []
+      for (const entry of input.options ?? []) {
+        const seed = typeof entry === 'string' ? { name: entry } : entry
+        options.push({
+          id: newId('opt'),
+          name: seed.name.trim() || 'Option',
+          color: seed.color ?? nextOptionColor(options),
+        })
+      }
+      property.options = options
+    } else if (input.options?.length) {
+      throw new WorkspaceRepositoryError(
+        'invalid_input',
+        `Only select, multi_select and status columns take options; "${input.type}" does not.`,
+      )
     }
 
     await this.writeProperties(input.databaseId, [...properties, property])
 
-    return { propertyId: property.id }
+    return property.options
+      ? { propertyId: property.id, options: property.options }
+      : { propertyId: property.id }
   }
 
   async updateProperty(input: {
@@ -1410,14 +1451,7 @@ export class WorkspaceRepository {
     type?: Exclude<PropertyType, 'title'>
   }): Promise<void> {
     const properties = await this.readProperties(input.databaseId)
-    const property = properties.find((p) => p.id === input.propertyId)
-
-    if (!property) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Property not found.',
-      )
-    }
+    const property = findColumn(properties, input.databaseId, input.propertyId)
 
     if (property.type === 'title' && input.type) {
       throw new WorkspaceRepositoryError(
@@ -1469,28 +1503,54 @@ export class WorkspaceRepository {
     databaseId: string
     propertyId: string
     name: string
-  }): Promise<{ optionId: string }> {
+    // A palette hex; omitted picks the first colour no option uses yet.
+    color?: string
+  }): Promise<{ optionId: string; option: PropertyOption }> {
     const properties = await this.readProperties(input.databaseId)
-    const property = properties.find((p) => p.id === input.propertyId)
-
-    if (!property || !OPTION_PROPERTY_TYPES.includes(property.type)) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option property not found.',
-      )
-    }
+    const property = findOptionColumn(
+      properties,
+      input.databaseId,
+      input.propertyId,
+    )
 
     const options = property.options ?? []
     const option: PropertyOption = {
       id: newId('opt'),
       name: input.name.trim() || 'Option',
-      color: pickColor(options.length),
+      color: input.color ?? nextOptionColor(options),
     }
     property.options = [...options, option]
 
     await this.writeProperties(input.databaseId, properties)
 
-    return { optionId: option.id }
+    return { optionId: option.id, option }
+  }
+
+  /** Rename and/or recolour a database column option. */
+  async updatePropertyOption(input: {
+    databaseId: string
+    propertyId: string
+    optionId: string
+    name?: string
+    color?: string
+  }): Promise<{ option: PropertyOption }> {
+    const properties = await this.readProperties(input.databaseId)
+    const property = findOptionColumn(
+      properties,
+      input.databaseId,
+      input.propertyId,
+    )
+    const option = findOption(property, input.optionId)
+
+    if (input.name !== undefined) {
+      option.name = input.name.trim() || 'Option'
+    }
+    if (input.color !== undefined) {
+      option.color = input.color
+    }
+    await this.writeProperties(input.databaseId, properties)
+
+    return { option }
   }
 
   async renamePropertyOption(input: {
@@ -1499,20 +1559,7 @@ export class WorkspaceRepository {
     optionId: string
     name: string
   }): Promise<void> {
-    const properties = await this.readProperties(input.databaseId)
-    const option = properties
-      .find((p) => p.id === input.propertyId)
-      ?.options?.find((o) => o.id === input.optionId)
-
-    if (!option) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option not found.',
-      )
-    }
-
-    option.name = input.name.trim() || 'Option'
-    await this.writeProperties(input.databaseId, properties)
+    await this.updatePropertyOption(input)
 
     return
   }
@@ -1521,52 +1568,49 @@ export class WorkspaceRepository {
     databaseId: string
     propertyId: string
     optionId: string
-  }): Promise<void> {
+  }): Promise<{ clearedRowCount: number }> {
     const properties = await this.readProperties(input.databaseId)
-    const property = properties.find((p) => p.id === input.propertyId)
+    const property = findOptionColumn(
+      properties,
+      input.databaseId,
+      input.propertyId,
+    )
+    findOption(property, input.optionId)
 
-    if (!property?.options) {
-      throw new WorkspaceRepositoryError(
-        'property_not_found',
-        'Option not found.',
-      )
-    }
-
-    property.options = property.options.filter((o) => o.id !== input.optionId)
+    property.options = (property.options ?? []).filter(
+      (o) => o.id !== input.optionId,
+    )
     await this.writeProperties(input.databaseId, properties)
 
     // Clear the removed option from every row's value.
-    const rows = await this.db
-      .select()
-      .from(collectionRowTable)
-      .where(eq(collectionRowTable.collectionId, input.databaseId))
+    const rows = await this.db.query.collectionRow.findMany({
+      where: eq(collectionRowTable.collectionId, input.databaseId),
+    })
 
-    await Promise.all(
-      rows.map((row) => {
+    const results = await Promise.all(
+      rows.map(async (row) => {
         const values = { ...row.values } as Record<string, CellValue>
         const current = values[input.propertyId]
-        let changed = false
 
         if (current === input.optionId) {
           values[input.propertyId] = null
-          changed = true
         } else if (Array.isArray(current) && current.includes(input.optionId)) {
           values[input.propertyId] = current.filter(
             (id) => id !== input.optionId,
           )
-          changed = true
+        } else {
+          return false
         }
 
-        return changed
-          ? this.db
-              .update(collectionRowTable)
-              .set({ values: values as JsonRecord, updatedAt: new Date() })
-              .where(eq(collectionRowTable.id, row.id))
-          : Promise.resolve()
+        await this.db
+          .update(collectionRowTable)
+          .set({ values: values as JsonRecord, updatedAt: new Date() })
+          .where(eq(collectionRowTable.id, row.id))
+        return true
       }),
     )
 
-    return
+    return { clearedRowCount: results.filter(Boolean).length }
   }
 
   // --- Rows --------------------------------------------------------------
@@ -1650,6 +1694,115 @@ export class WorkspaceRepository {
     await this.notifyDatabase(row.collectionId)
 
     return
+  }
+
+  /**
+   * Archive or unarchive rows. Archived rows keep all their data and can be
+   * restored; views and MCP reads just hide them by default. Every id must
+   * belong to this workspace — nothing is written if any is unknown.
+   */
+  async setRowsArchived(input: {
+    rowIds: string[]
+    archived: boolean
+  }): Promise<{ rowIds: string[]; archived: boolean }> {
+    const rowIds = [...new Set(input.rowIds)]
+    // A join (row → database → org), so this stays on select().
+    const found = await this.db
+      .select({
+        id: collectionRowTable.id,
+        collectionId: collectionRowTable.collectionId,
+      })
+      .from(collectionRowTable)
+      .innerJoin(
+        collectionTable,
+        eq(collectionRowTable.collectionId, collectionTable.id),
+      )
+      .where(
+        and(
+          inArray(collectionRowTable.id, rowIds),
+          eq(collectionTable.organizationId, this.ctx.organizationId),
+        ),
+      )
+
+    const missing = rowIds.filter((id) => !found.some((row) => row.id === id))
+    if (missing.length > 0) {
+      throw new WorkspaceRepositoryError(
+        'row_not_found',
+        `Row${missing.length > 1 ? 's' : ''} ${missing
+          .map((id) => `"${id}"`)
+          .join(
+            ', ',
+          )} ${missing.length > 1 ? 'were' : 'was'} not found in this workspace.`,
+      )
+    }
+
+    const now = new Date()
+    await this.db
+      .update(collectionRowTable)
+      .set({
+        isArchived: input.archived,
+        archivedAt: input.archived ? now : null,
+        updatedAt: now,
+        lastEditedByUserId: this.ctx.userId,
+      })
+      .where(inArray(collectionRowTable.id, rowIds))
+
+    await Promise.all(
+      [...new Set(found.map((row) => row.collectionId))].map((databaseId) =>
+        this.notifyDatabase(databaseId),
+      ),
+    )
+
+    return { rowIds, archived: input.archived }
+  }
+
+  // --- Assets ------------------------------------------------------------
+
+  /**
+   * Store an already-validated upload in R2 under `assets/<assetId>/<file>`
+   * and record it in the asset table for this workspace. Returns the app path
+   * (`/api/assets/…`) that image blocks and Markdown bodies reference.
+   */
+  async uploadAsset(input: {
+    fileName: string
+    mime: string
+    bytes: Uint8Array
+  }): Promise<{
+    assetId: string
+    path: string
+    fileName: string
+    mime: string
+    sizeBytes: number
+  }> {
+    if (!this.assets) {
+      throw new WorkspaceRepositoryError(
+        'invalid_input',
+        'Asset storage (R2) is not configured on this server.',
+      )
+    }
+
+    const assetId = crypto.randomUUID()
+    const key = buildR2AssetKey({ assetId, fileName: input.fileName })
+
+    await this.assets.put(key, input.bytes, {
+      httpMetadata: { contentType: input.mime },
+    })
+    await this.db.insert(assetTable).values({
+      id: assetId,
+      organizationId: this.ctx.organizationId,
+      r2Key: key,
+      mime: input.mime,
+      sizeBytes: input.bytes.byteLength,
+      uploadedByUserId: this.ctx.userId,
+    })
+
+    return {
+      assetId,
+      path: `/api/${key}`,
+      fileName: key.slice(key.lastIndexOf('/') + 1),
+      mime: input.mime,
+      sizeBytes: input.bytes.byteLength,
+    }
   }
 
   // --- Import / seed -----------------------------------------------------
@@ -1889,7 +2042,7 @@ export class WorkspaceRepository {
     if (!page) {
       throw new WorkspaceRepositoryError(
         'page_not_found',
-        'Workspace page was not found.',
+        `Page "${pageId}" was not found in this workspace.`,
       )
     }
 
@@ -1912,7 +2065,7 @@ export class WorkspaceRepository {
     if (!row) {
       throw new WorkspaceRepositoryError(
         'block_not_found',
-        'Workspace block was not found.',
+        `Block "${blockId}" was not found in this workspace.`,
       )
     }
 
@@ -1934,7 +2087,7 @@ export class WorkspaceRepository {
     if (!database) {
       throw new WorkspaceRepositoryError(
         'database_not_found',
-        'Database was not found.',
+        `Database "${databaseId}" was not found in this workspace.`,
       )
     }
 
@@ -1958,7 +2111,10 @@ export class WorkspaceRepository {
       .limit(1)
 
     if (!row) {
-      throw new WorkspaceRepositoryError('view_not_found', 'View not found.')
+      throw new WorkspaceRepositoryError(
+        'view_not_found',
+        `View "${viewId}" was not found in this workspace.`,
+      )
     }
 
     return row.view
@@ -1981,11 +2137,72 @@ export class WorkspaceRepository {
       .limit(1)
 
     if (!row) {
-      throw new WorkspaceRepositoryError('row_not_found', 'Row not found.')
+      throw new WorkspaceRepositoryError(
+        'row_not_found',
+        `Row "${rowId}" was not found in this workspace.`,
+      )
     }
 
     return row.row
   }
+}
+
+/** A database column by id, or a `property_not_found` error naming it. */
+function findColumn(
+  properties: DatabaseProperty[],
+  databaseId: string,
+  propertyId: string,
+): DatabaseProperty {
+  const property = properties.find((p) => p.id === propertyId)
+
+  if (!property) {
+    throw new WorkspaceRepositoryError(
+      'property_not_found',
+      `Column "${propertyId}" was not found on database "${databaseId}". Columns: ${properties
+        .map((p) => `"${p.name}" (${p.id})`)
+        .join(', ')}.`,
+    )
+  }
+
+  return property
+}
+
+/** A select / multi_select / status column, or a clear error. */
+function findOptionColumn(
+  properties: DatabaseProperty[],
+  databaseId: string,
+  propertyId: string,
+): DatabaseProperty {
+  const property = findColumn(properties, databaseId, propertyId)
+
+  if (!OPTION_PROPERTY_TYPES.includes(property.type)) {
+    throw new WorkspaceRepositoryError(
+      'invalid_input',
+      `Column "${property.name}" (${property.id}) is a ${property.type} column; only select, multi_select and status columns have options.`,
+    )
+  }
+
+  return property
+}
+
+function findOption(
+  property: DatabaseProperty,
+  optionId: string,
+): PropertyOption {
+  const option = property.options?.find((o) => o.id === optionId)
+
+  if (!option) {
+    throw new WorkspaceRepositoryError(
+      'option_not_found',
+      `Option "${optionId}" was not found on column "${property.name}" (${property.id}). Options: ${(
+        property.options ?? []
+      )
+        .map((o) => `"${o.name}" (${o.id})`)
+        .join(', ')}.`,
+    )
+  }
+
+  return option
 }
 
 function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
@@ -2029,6 +2246,22 @@ function toDatabaseView(
       propertyId: string
       value: string
     }>,
+  }
+}
+
+function toDatabaseRow(
+  row: typeof collectionRowTable.$inferSelect,
+): DatabaseRow {
+  return {
+    id: row.id,
+    position: row.position,
+    values: (row.values ?? {}) as Record<string, CellValue>,
+    body: row.body ?? null,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    pageId: row.pageId ?? null,
+    isArchived: Boolean(row.isArchived),
+    archivedAt: row.archivedAt ? toIso(row.archivedAt) : null,
   }
 }
 
