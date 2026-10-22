@@ -71,6 +71,11 @@ export function sniffImageMime(bytes: Uint8Array): string | null {
 /** Decode base64 (optionally a data: URL) to bytes. */
 export function decodeBase64(data: string): Uint8Array {
   const payload = data.replace(/^data:[^;,]*;base64,/i, '').replace(/\s+/g, '')
+  // Reject oversized payloads before decoding: decoding copies the data twice
+  // (binary string + bytes), so the size check must not wait until after.
+  if (payload.length > MAX_BASE64_LENGTH) {
+    throw tooLarge()
+  }
   if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(payload)) {
     throw invalid('`data` is not valid base64.')
   }
@@ -82,32 +87,56 @@ export function decodeBase64(data: string): Uint8Array {
   return bytes
 }
 
+// Base64 encodes every 3 bytes as 4 characters.
+const MAX_BASE64_LENGTH = Math.ceil(maxImageUploadBytes / 3) * 4
+
+const MAX_REDIRECTS = 5
+
 const tooLarge = () =>
   invalid(
     `Image is too large (max ${Math.round(maxImageUploadBytes / 1024 / 1024)}MB).`,
   )
+
+function assertFetchableUrl(value: string): URL {
+  const parsed = new URL(value)
+  if (parsed.protocol !== 'https:') {
+    throw invalid(
+      `\`url\` must be an https URL (got ${parsed.protocol}//${parsed.host}).`,
+    )
+  }
+  if (parsed.username || parsed.password) {
+    throw invalid('`url` must not contain credentials.')
+  }
+  return parsed
+}
 
 /** Fetch an https image, refusing anything over the image size limit. */
 export async function fetchImageBytes(
   url: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ bytes: Uint8Array; contentType: string | null }> {
-  const parsed = new URL(url)
-  if (parsed.protocol !== 'https:') {
-    throw invalid('`url` must be an https URL.')
-  }
-  if (parsed.username || parsed.password) {
-    throw invalid('`url` must not contain credentials.')
-  }
-
+  // Follow redirects by hand so every hop gets the same https / no-credentials
+  // check as the original URL (`redirect: 'follow'` would accept http hops).
+  let target = assertFetchableUrl(url)
   let response: Response
-  try {
-    response = await fetchImpl(parsed.toString(), {
-      redirect: 'follow',
-      headers: { accept: 'image/*' },
-    })
-  } catch {
-    throw invalid(`Could not fetch ${url}.`)
+  for (let hops = 0; ; hops++) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each hop depends on the last
+      response = await fetchImpl(target.toString(), {
+        redirect: 'manual',
+        headers: { accept: 'image/*' },
+      })
+    } catch {
+      throw invalid(`Could not fetch ${url}.`)
+    }
+    const location = response.headers.get('location')
+    if (response.status < 300 || response.status >= 400 || !location) {
+      break
+    }
+    if (hops >= MAX_REDIRECTS) {
+      throw invalid(`Fetching ${url} redirected too many times.`)
+    }
+    target = assertFetchableUrl(new URL(location, target).toString())
   }
   if (!response.ok) {
     throw invalid(`Fetching ${url} failed with HTTP ${response.status}.`)

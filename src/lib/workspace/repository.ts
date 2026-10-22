@@ -1,4 +1,14 @@
-import { and, asc, eq, inArray, isNull, like, or } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  like,
+  or,
+  sql,
+} from 'drizzle-orm'
 
 import { buildR2AssetKey } from '#/lib/assets/intents'
 import type { AppDatabase } from '#/lib/db/connection'
@@ -72,6 +82,18 @@ export type WorkspaceContext = {
  */
 export type WorkspaceNotifier = {
   pageChanged: (pageId: string) => Promise<void> | void
+}
+
+/** read_page payload for agents: databases carry a row preview + counts. */
+export type AgentPage = Omit<WorkspacePage, 'databases'> & {
+  databases: Array<
+    Omit<WorkspaceDatabase, 'rows'> & {
+      rows: Array<DatabaseRow & { hasBody: boolean }>
+      rowCount: number
+      archivedRowCount: number
+      rowsTruncated: boolean
+    }
+  >
 }
 
 export type WorkspaceBlockUpdate = {
@@ -266,6 +288,50 @@ export class WorkspaceRepository {
     return rows.map(toPageSummary)
   }
 
+  /**
+   * A page for agents: like getPage, but each database carries only a preview
+   * of its non-archived rows (without bodies) plus row counts, so a big board
+   * is never loaded in full.
+   */
+  async getPageForAgent(
+    slug: string,
+    rowPreviewLimit: number,
+  ): Promise<AgentPage | null> {
+    const pageRow = await this.db.query.page.findFirst({
+      where: and(
+        eq(pageTable.organizationId, this.ctx.organizationId),
+        eq(pageTable.slug, slug),
+        eq(pageTable.isArchived, false),
+      ),
+    })
+
+    if (!pageRow) {
+      return null
+    }
+
+    const page = await this.assemblePage(pageRow, { skipDatabases: true })
+    const databaseIds = page.blocks
+      .filter((block) => block.type === 'database' && block.databaseId)
+      .map((block) => block.databaseId as string)
+    const databases = await Promise.all(
+      databaseIds.map(async (databaseId) => {
+        const result = await this.getDatabaseRowsPage(databaseId, {
+          includeArchived: false,
+          includeBodies: false,
+          limit: rowPreviewLimit,
+          offset: 0,
+        })
+        return Object.assign(result.database, {
+          rowCount: result.total,
+          archivedRowCount: result.archivedCount,
+          rowsTruncated: result.total > result.database.rows.length,
+        })
+      }),
+    )
+
+    return { ...page, databases }
+  }
+
   async getPage(slug: string): Promise<WorkspacePage | null> {
     const [pageRow] = await this.db
       .select()
@@ -312,6 +378,90 @@ export class WorkspaceRepository {
     return database ?? null
   }
 
+  /**
+   * One page of a database's rows, with the archive filter, LIMIT/OFFSET and
+   * body exclusion done in SQL so large boards are never loaded in full.
+   * `total` counts the rows matching the archive filter; `archivedCount` is
+   * every archived row. Rows carry `hasBody`; `body` is null unless
+   * `includeBodies`.
+   */
+  async getDatabaseRowsPage(
+    databaseId: string,
+    options: {
+      includeArchived: boolean
+      includeBodies: boolean
+      limit: number
+      offset: number
+    },
+  ): Promise<{
+    database: Omit<WorkspaceDatabase, 'rows'> & {
+      rows: Array<DatabaseRow & { hasBody: boolean }>
+    }
+    total: number
+    archivedCount: number
+  }> {
+    const database = await this.assertDatabaseInOrg(databaseId)
+    const properties = (database.schema ?? []) as DatabaseProperty[]
+    const scope = eq(collectionRowTable.collectionId, databaseId)
+
+    const [ownerBlock, views, counts, rows] = await Promise.all([
+      this.db.query.block.findFirst({
+        columns: { id: true },
+        where: eq(blockTable.collectionId, databaseId),
+      }),
+      this.db.query.collectionView.findMany({
+        where: eq(collectionViewTable.collectionId, databaseId),
+        orderBy: asc(collectionViewTable.position),
+      }),
+      // Aggregation, so this stays on select().
+      this.db
+        .select({
+          all: count(),
+          archived: sql<number>`coalesce(sum(case when ${collectionRowTable.isArchived} then 1 else 0 end), 0)`,
+        })
+        .from(collectionRowTable)
+        .where(scope),
+      this.db.query.collectionRow.findMany({
+        columns: options.includeBodies ? undefined : { body: false },
+        extras: {
+          hasBody:
+            sql<number>`(${collectionRowTable.body} is not null and trim(${collectionRowTable.body}) != '')`.as(
+              'has_body',
+            ),
+        },
+        where: options.includeArchived
+          ? scope
+          : and(scope, eq(collectionRowTable.isArchived, false)),
+        orderBy: asc(collectionRowTable.position),
+        limit: options.limit,
+        offset: options.offset,
+      }),
+    ])
+
+    const all = Number(counts[0]?.all ?? 0)
+    const archivedCount = Number(counts[0]?.archived ?? 0)
+
+    return {
+      database: {
+        id: database.id,
+        blockId: ownerBlock?.id ?? '',
+        title: database.title,
+        titlePropertyId: titlePropertyId(properties),
+        properties,
+        views: views.map((view) => toDatabaseView(view, properties)),
+        // toDatabaseRow returns a fresh object, so extend it in place.
+        rows: rows.map((row) =>
+          Object.assign(
+            toDatabaseRow({ ...row, body: 'body' in row ? row.body : null }),
+            { hasBody: Boolean(row.hasBody) },
+          ),
+        ),
+      },
+      total: options.includeArchived ? all : all - archivedCount,
+      archivedCount,
+    }
+  }
+
   /** A database's columns without loading its rows (cheap; for validation). */
   async getDatabaseSchema(databaseId: string): Promise<{
     id: string
@@ -339,6 +489,7 @@ export class WorkspaceRepository {
 
   private async assemblePage(
     pageRow: typeof pageTable.$inferSelect,
+    options: { skipDatabases?: boolean } = {},
   ): Promise<WorkspacePage> {
     const [blocks, summaries] = await Promise.all([
       this.db
@@ -353,7 +504,9 @@ export class WorkspaceRepository {
       .filter((block) => block.type === 'database' && block.collectionId)
       .map((block) => block.collectionId as string)
 
-    const databases = await this.loadDatabases(databaseIds, blocks)
+    const databases = options.skipDatabases
+      ? []
+      : await this.loadDatabases(databaseIds, blocks)
     const properties = await this.resolveAttachedProperties(pageRow)
 
     const summaryById = new Map(summaries.map((page) => [page.id, page]))

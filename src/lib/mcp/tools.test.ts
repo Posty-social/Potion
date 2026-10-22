@@ -261,14 +261,54 @@ function createFakeRepository(): FakeRepository {
         .slice(0, limit)
         .map(toSummary)
     },
-    async getPage(slug) {
-      return pages.find((page) => page.slug === slug) ?? null
-    },
     async getPageById(pageId) {
       return pages.find((page) => page.id === pageId) ?? null
     },
-    async getDatabaseById(databaseId) {
-      return databaseId === board.id ? board : null
+    // In-memory stand-ins for the SQL-paged repository reads.
+    async getDatabaseRowsPage(databaseId, options) {
+      const database = findBoard(databaseId)
+      const visible = options.includeArchived
+        ? database.rows
+        : database.rows.filter((row) => !row.isArchived)
+      const archivedCount = database.rows.filter((row) => row.isArchived).length
+      return {
+        database: {
+          ...database,
+          rows: visible
+            .slice(options.offset, options.offset + options.limit)
+            .map((row) =>
+              Object.assign({}, row, {
+                body: options.includeBodies ? row.body : null,
+                hasBody: Boolean(row.body?.trim()),
+              }),
+            ),
+        },
+        total: visible.length,
+        archivedCount,
+      }
+    },
+    async getPageForAgent(slug, rowPreviewLimit) {
+      const page = pages.find((candidate) => candidate.slug === slug)
+      if (!page) {
+        return null
+      }
+      const databases = await Promise.all(
+        page.databases.map(async (database) => {
+          const result = await this.getDatabaseRowsPage(database.id, {
+            includeArchived: false,
+            includeBodies: false,
+            limit: rowPreviewLimit,
+            offset: 0,
+          })
+          return {
+            ...result.database,
+            rowCount: result.total,
+            archivedRowCount: result.archivedCount,
+            rowsTruncated: result.total > result.database.rows.length,
+          }
+        }),
+      )
+      return { ...page, databases }
     },
     async createPage(input) {
       const page = makePage({
@@ -936,6 +976,55 @@ describe('MCP board tools', () => {
       expect(neither.error?.message).toMatch(/exactly one of `data`/)
 
       expect(repository.uploads).toHaveLength(0)
+    })
+
+    it('rejects oversized base64 before decoding it', async () => {
+      const { repository, call } = boardHarness()
+      const atobSpy = vi.spyOn(globalThis, 'atob')
+
+      const result = await call('upload_asset', {
+        data: 'A'.repeat(Math.ceil((10 * 1024 * 1024) / 3) * 4 + 4),
+      })
+
+      expect(result.error?.message).toMatch(/too large/)
+      expect(atobSpy).not.toHaveBeenCalled()
+      expect(repository.uploads).toHaveLength(0)
+      atobSpy.mockRestore()
+    })
+
+    it('follows https redirects but refuses a hop to http', async () => {
+      const { repository, call } = boardHarness()
+      const bytes = Uint8Array.from(atob(PNG_BASE64), (c) => c.charCodeAt(0))
+      const fetchMock = vi.fn(async (url: string) =>
+        url.endsWith('/to-http')
+          ? new Response(null, {
+              status: 302,
+              headers: { location: 'http://example.com/a.png' },
+            })
+          : url.endsWith('/to-https')
+            ? new Response(null, {
+                status: 301,
+                headers: { location: '/real/shot.png' },
+              })
+            : new Response(bytes),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const insecure = await call('upload_asset', {
+        url: 'https://example.com/to-http',
+      })
+      expect(insecure.error?.message).toMatch(/must be an https URL/)
+      expect(repository.uploads).toHaveLength(0)
+
+      const secure = await call('upload_asset', {
+        url: 'https://example.com/to-https',
+      })
+      expect(secure.error).toBeUndefined()
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        'https://example.com/real/shot.png',
+        expect.objectContaining({ redirect: 'manual' }),
+      )
+      expect(repository.uploads).toHaveLength(1)
     })
 
     it('rejects images over the size limit', async () => {

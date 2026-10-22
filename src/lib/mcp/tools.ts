@@ -8,6 +8,7 @@ import {
 } from '#/lib/workspace/cell-values'
 import {
   WorkspaceRepositoryError,
+  type AgentPage,
   type WorkspaceRepository,
 } from '#/lib/workspace/repository'
 import {
@@ -37,11 +38,6 @@ import {
   updatePropertySchema,
   updateRowBodySchema,
 } from '#/lib/workspace/schemas'
-import type {
-  DatabaseRow,
-  WorkspaceDatabase,
-  WorkspacePage,
-} from '#/lib/workspace/types'
 
 import { prepareAssetUpload, uploadAssetInputSchema } from './assets'
 
@@ -50,8 +46,8 @@ export type McpRepository = Pick<
   WorkspaceRepository,
   | 'listPages'
   | 'searchPages'
-  | 'getPage'
-  | 'getDatabaseById'
+  | 'getPageForAgent'
+  | 'getDatabaseRowsPage'
   | 'createPage'
   | 'renamePage'
   | 'setPageIcon'
@@ -1202,27 +1198,28 @@ export async function callMcpTool(
 
   if (tool === 'read_page') {
     const data = getPageSchema.parse(rest ?? {})
-    const page = await repository.getPage(data.slug)
+    const page = await repository.getPageForAgent(
+      data.slug,
+      PAGE_ROW_PREVIEW_LIMIT,
+    )
 
     if (!page) {
       throw pageSlugNotFound(data.slug)
     }
 
-    return toolResult({ page: lightPage(page) })
+    return toolResult({ page: stripBodies(page) })
   }
 
   if (tool === 'read_database') {
     const data = readDatabaseInputSchema.parse(rest ?? {})
-    const database = await repository.getDatabaseById(data.databaseId)
+    const result = await repository.getDatabaseRowsPage(data.databaseId, {
+      includeArchived: data.includeArchived ?? false,
+      includeBodies: data.includeBodies ?? false,
+      limit: data.limit ?? DEFAULT_ROW_LIMIT,
+      offset: data.offset ?? 0,
+    })
 
-    if (!database) {
-      throw new WorkspaceRepositoryError(
-        'database_not_found',
-        `Database "${data.databaseId}" was not found in this workspace.`,
-      )
-    }
-
-    return toolResult(readDatabaseResult(database, data))
+    return toolResult(readDatabaseResult(result, data))
   }
 
   if (tool === 'read_row') {
@@ -1512,7 +1509,7 @@ async function readPageResource(repository: McpRepository, params: unknown) {
   }
 
   const slug = uri.slice(PAGE_RESOURCE_PREFIX.length)
-  const page = await repository.getPage(slug)
+  const page = await repository.getPageForAgent(slug, PAGE_ROW_PREVIEW_LIMIT)
 
   if (!page) {
     throw pageSlugNotFound(slug)
@@ -1523,7 +1520,7 @@ async function readPageResource(repository: McpRepository, params: unknown) {
       {
         uri,
         mimeType: 'application/json',
-        text: JSON.stringify(lightPage(page)),
+        text: JSON.stringify(stripBodies(page)),
       },
     ],
   }
@@ -1538,58 +1535,44 @@ function pageSlugNotFound(slug: string) {
   )
 }
 
-/** A row without its (possibly long) Markdown body, flagged with hasBody. */
-function rowWithoutBody(row: DatabaseRow) {
-  const { body, ...rest } = row
-  return { ...rest, hasBody: Boolean(body?.trim()) }
+/** A row without its (possibly long) Markdown body; `hasBody` stays. */
+function withoutBody<T extends { body: string | null }>(row: T) {
+  const { body: _body, ...rest } = row
+  return rest
 }
 
 /**
- * read_page payload: page blocks and properties as-is, but each database
- * inlines only a preview of its non-archived rows, without bodies. Big boards
- * otherwise produce responses in the hundreds of kilobytes.
+ * read_page payload: the repository already limited each database to a
+ * preview of non-archived rows with counts; drop the (null) body fields.
  */
-function lightPage(page: WorkspacePage) {
+function stripBodies(page: AgentPage) {
   return {
     ...page,
-    databases: page.databases.map((database) => {
-      const active = database.rows.filter((row) => !row.isArchived)
-      return {
-        ...database,
-        rows: active.slice(0, PAGE_ROW_PREVIEW_LIMIT).map(rowWithoutBody),
-        rowCount: active.length,
-        archivedRowCount: database.rows.length - active.length,
-        rowsTruncated: active.length > PAGE_ROW_PREVIEW_LIMIT,
-      }
-    }),
+    databases: page.databases.map((database) => ({
+      ...database,
+      rows: database.rows.map(withoutBody),
+    })),
   }
 }
 
 function readDatabaseResult(
-  database: WorkspaceDatabase,
+  result: Awaited<ReturnType<McpRepository['getDatabaseRowsPage']>>,
   options: z.infer<typeof readDatabaseInputSchema>,
 ) {
-  const visible = options.includeArchived
-    ? database.rows
-    : database.rows.filter((row) => !row.isArchived)
   const offset = options.offset ?? 0
   const limit = options.limit ?? DEFAULT_ROW_LIMIT
-  const pageRows = visible.slice(offset, offset + limit)
-  const nextOffset = offset + limit < visible.length ? offset + limit : null
-  const archivedRowsHidden = database.rows.length - visible.length
+  const returned = result.database.rows.length
+  const nextOffset = offset + returned < result.total ? offset + returned : null
+  const archivedRowsHidden = options.includeArchived ? 0 : result.archivedCount
 
   return {
     database: {
-      ...database,
-      rows: options.includeBodies ? pageRows : pageRows.map(rowWithoutBody),
+      ...result.database,
+      rows: options.includeBodies
+        ? result.database.rows
+        : result.database.rows.map(withoutBody),
     },
-    paging: {
-      offset,
-      limit,
-      returned: pageRows.length,
-      total: visible.length,
-      nextOffset,
-    },
+    paging: { offset, limit, returned, total: result.total, nextOffset },
     archivedRowsHidden,
     ...(archivedRowsHidden > 0
       ? {
