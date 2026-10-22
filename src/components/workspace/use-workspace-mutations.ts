@@ -9,6 +9,7 @@ import {
   addWorkspacePropertyOption,
   addWorkspaceRow,
   addWorkspaceView,
+  archiveWorkspaceRows,
   createWorkspaceBlock,
   createWorkspacePage,
   deleteWorkspaceBlock,
@@ -37,19 +38,23 @@ import {
   updateWorkspaceBlock,
   updateWorkspacePageProperty,
   updateWorkspaceProperty,
+  updateWorkspacePropertyOption,
   updateWorkspaceRow,
   updateWorkspaceRowBody,
 } from '#/lib/workspace/functions'
 import {
-  FIELD_OPTION_COLORS,
   OPTION_PROPERTY_TYPES,
+  nextOptionColor,
   type CellValue,
   type DatabaseProperty,
+  type DatabaseRow,
   type DatabaseViewType,
   type PropertyType,
   type WorkspaceBlockType,
   type WorkspacePage,
 } from '#/lib/workspace/types'
+
+import { hasPendingRowWrites, inOrder } from './row-write-queue'
 
 type OptionPropertyType = Exclude<PropertyType, 'title'>
 
@@ -111,6 +116,38 @@ export function useWorkspaceMutations() {
           // Server rejected; the refetch below restores the truth.
         })
         .then(() => invalidate())
+    }
+
+    // Row writes go through the in-order queue and only refetch once it has
+    // drained, so a refetch between two queued writes can't briefly undo the
+    // optimistic state. On failure the drained refetch restores server truth.
+    const settleRowWrite = async <T>(promise: Promise<T>): Promise<T> => {
+      try {
+        return await promise
+      } finally {
+        if (!hasPendingRowWrites()) {
+          await invalidate()
+        }
+      }
+    }
+
+    // Patch one database row wherever it is cached (rows live on the page that
+    // hosts their database). In-flight page refetches are cancelled first so a
+    // stale response can't overwrite the patch.
+    const patchRows = (
+      rowIds: string[],
+      update: (row: DatabaseRow) => DatabaseRow,
+    ) => {
+      void queryClient.cancelQueries({ queryKey: ['workspace', 'page'] })
+      patchPages((page) => ({
+        ...page,
+        databases: page.databases.map((database) => ({
+          ...database,
+          rows: database.rows.map((row) =>
+            rowIds.includes(row.id) ? update(row) : row,
+          ),
+        })),
+      }))
     }
 
     // Patch a shared property definition everywhere it is cached: on every
@@ -244,10 +281,7 @@ export function useWorkspaceMutations() {
               {
                 id: optionId,
                 name: input.name,
-                color:
-                  FIELD_OPTION_COLORS[
-                    options.length % FIELD_OPTION_COLORS.length
-                  ],
+                color: nextOptionColor(options),
               },
             ],
           }
@@ -412,6 +446,13 @@ export function useWorkspaceMutations() {
         optionId: string
         name: string
       }) => run(renameWorkspacePropertyOption({ data: input })),
+      updatePropertyOption: (input: {
+        databaseId: string
+        propertyId: string
+        optionId: string
+        name?: string
+        color?: string
+      }) => run(updateWorkspacePropertyOption({ data: input })),
       deletePropertyOption: (input: {
         databaseId: string
         propertyId: string
@@ -422,14 +463,42 @@ export function useWorkspaceMutations() {
         databaseId: string
         values?: Record<string, CellValue>
       }) => run(addWorkspaceRow({ data: input })),
+      // Optimistic, so a card dropped on a board column (or any edited cell)
+      // moves immediately; run() then syncs with the server, and its
+      // invalidate restores server truth if the write fails.
       updateRow: (input: {
         rowId: string
         values: Record<string, CellValue>
-      }) => run(updateWorkspaceRow({ data: input })),
+      }) => {
+        patchRows([input.rowId], (row) => ({
+          ...row,
+          values: { ...row.values, ...input.values },
+        }))
+        return settleRowWrite(
+          inOrder(() => updateWorkspaceRow({ data: input })),
+        )
+      },
       updateRowBody: (input: { rowId: string; body: string }) =>
-        run(updateWorkspaceRowBody({ data: input })),
+        settleRowWrite(inOrder(() => updateWorkspaceRowBody({ data: input }))),
       deleteRow: (input: { rowId: string }) =>
-        run(deleteWorkspaceRow({ data: input })),
+        settleRowWrite(inOrder(() => deleteWorkspaceRow({ data: input }))),
+      // Archive / unarchive rows. Optimistic so the card leaves (or returns
+      // to) the board immediately; the background sync reconciles with the
+      // server and rolls back on failure.
+      setRowsArchived: (input: { rowIds: string[]; archived: boolean }) => {
+        const archivedAt = input.archived ? new Date().toISOString() : null
+        patchRows(input.rowIds, (row) => ({
+          ...row,
+          isArchived: input.archived,
+          archivedAt,
+        }))
+        void settleRowWrite(
+          inOrder(() => archiveWorkspaceRows({ data: input })),
+        ).catch(() => {
+          // The drained refetch has already restored server truth.
+        })
+        return Promise.resolve()
+      },
     }
   }, [invalidate, patchPage, patchPages, patchCatalog, queryClient])
 }

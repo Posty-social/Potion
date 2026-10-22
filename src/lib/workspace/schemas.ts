@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { sanitizeImportedText } from './import'
+import { FIELD_OPTION_COLOR_NAMES, resolveOptionColor } from './types'
 
 const importedTextSchema = (maxLength: number) =>
   z
@@ -157,11 +158,37 @@ export const setViewPropertiesSchema = z.object({
   visiblePropertyIds: z.array(id).nullable(),
 })
 
+// An option colour from the UI palette, as a name ("green") or hex
+// ("#dcebdd"). Normalized to the palette hex.
+export const optionColorSchema = z.string().transform((value, ctx) => {
+  const color = resolveOptionColor(value)
+  if (!color) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `Unknown colour "${value}". Use one of: ${Object.keys(
+        FIELD_OPTION_COLOR_NAMES,
+      ).join(', ')} (or their hex values).`,
+    })
+    return z.NEVER
+  }
+  return color
+})
+
+const newOptionSchema = z.union([
+  z.string().min(1).max(80),
+  z.object({
+    name: z.string().min(1).max(80),
+    color: optionColorSchema.optional(),
+  }),
+])
+
 // Properties
 export const addPropertySchema = z.object({
   databaseId: id,
   name: z.string().min(1).max(80),
   type: propertyTypeSchema,
+  // Initial options for a select / multi_select / status column.
+  options: z.array(newOptionSchema).max(50).optional(),
 })
 export const updatePropertySchema = z.object({
   databaseId: id,
@@ -176,7 +203,20 @@ export const addPropertyOptionSchema = z.object({
   databaseId: id,
   propertyId: id,
   name: z.string().min(1).max(80),
+  // Omit to pick the first unused palette colour.
+  color: optionColorSchema.optional(),
 })
+export const updatePropertyOptionSchema = z
+  .object({
+    databaseId: id,
+    propertyId: id,
+    optionId: id,
+    name: z.string().min(1).max(80).optional(),
+    color: optionColorSchema.optional(),
+  })
+  .refine((data) => data.name !== undefined || data.color !== undefined, {
+    message: 'Provide a new name, a colour, or both.',
+  })
 export const renamePropertyOptionSchema = z.object({
   databaseId: id,
   propertyId: id,
@@ -200,6 +240,10 @@ export const updateRowBodySchema = z.object({
   body: z.string().max(100_000),
 })
 export const deleteRowSchema = z.object({ rowId: id })
+export const archiveRowsSchema = z.object({
+  rowIds: z.array(id).min(1).max(200),
+  archived: z.boolean(),
+})
 
 // --- Page properties -----------------------------------------------------
 

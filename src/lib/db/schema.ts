@@ -261,6 +261,12 @@ export const collectionRow = sqliteTable(
     // row is opened in the side peek. Null until the user writes something.
     body: text('body'),
     position: text('position').notNull(),
+    // Archived rows stay in the database (reversible, never a delete) but are
+    // hidden from views and from MCP reads unless explicitly requested.
+    isArchived: integer('is_archived', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    archivedAt: nullableTimestamp('archived_at'),
     pageId: text('page_id').references(() => page.id, { onDelete: 'set null' }),
     createdByUserId: text('created_by_user_id')
       .notNull()

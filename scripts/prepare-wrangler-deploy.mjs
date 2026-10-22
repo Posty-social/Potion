@@ -129,6 +129,12 @@ if (process.env.D1_DATABASE_NAME) {
   config.d1_databases[0].database_name = process.env.D1_DATABASE_NAME
 }
 
+// Keep the ASSETS binding (used for MCP uploads and media cleanup) on the same
+// bucket the presigned GET/PUT URLs use (R2_BUCKET_NAME var below).
+if (process.env.R2_BUCKET_NAME && config.r2_buckets?.[0]) {
+  config.r2_buckets[0].bucket_name = process.env.R2_BUCKET_NAME
+}
+
 // Serve exclusively on the custom domain; Access protects this hostname.
 config.routes = [{ pattern: appDomain, custom_domain: true }]
 config.workers_dev = false

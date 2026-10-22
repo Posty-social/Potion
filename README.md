@@ -156,8 +156,12 @@ OAuth). Connect it to Claude Code with:
 claude mcp add --transport http potion https://<your-domain>/mcp
 ```
 
-Agents get tools to list workspaces, search and read pages, manage blocks,
-database rows, and shared page properties.
+Agents get tools to list workspaces and members, search and read pages, manage
+blocks, database rows (including archiving), database columns and their
+select/status options, shared page properties, and to upload images
+(`upload_asset`) for image blocks and row-body Markdown. Large databases are
+paged (`read_database` `limit`/`offset`) and row bodies are only returned on
+request (`includeBodies`, `read_row`).
 
 ## Testing
 

@@ -95,6 +95,10 @@ export type DatabaseRow = {
   createdAt: string
   updatedAt: string
   pageId: string | null
+  /** Archived rows are hidden from views by default; archiving is reversible. */
+  isArchived: boolean
+  /** ISO timestamp of when the row was archived, or null. */
+  archivedAt: string | null
 }
 
 export type DatabaseViewType = z.infer<typeof viewTypeSchema>
@@ -170,6 +174,47 @@ export const FIELD_OPTION_COLORS = [
   '#d9eeec',
   '#e6e2d6',
 ] as const
+
+/** Human names for the palette, in the same order (used by MCP tools). */
+export const FIELD_OPTION_COLOR_NAMES: Record<
+  string,
+  (typeof FIELD_OPTION_COLORS)[number]
+> = {
+  blue: '#dce8f2',
+  green: '#dcebdd',
+  yellow: '#f1dfbd',
+  purple: '#eadff0',
+  red: '#f7d9cf',
+  teal: '#d9eeec',
+  gray: '#e6e2d6',
+}
+
+/**
+ * Resolve a palette colour given as a name ("green") or hex ("#dcebdd"),
+ * case-insensitively. Returns null for anything outside the palette.
+ */
+export function resolveOptionColor(input: string): string | null {
+  const value = input.trim().toLowerCase()
+  const byName = FIELD_OPTION_COLOR_NAMES[value === 'grey' ? 'gray' : value]
+  if (byName) {
+    return byName
+  }
+  return (FIELD_OPTION_COLORS as readonly string[]).includes(value)
+    ? value
+    : null
+}
+
+/**
+ * The palette colour for a new option: the first one no existing option uses,
+ * cycling once every colour is taken.
+ */
+export function nextOptionColor(existing: Array<{ color?: string }>): string {
+  const used = new Set(existing.map((option) => option.color))
+  return (
+    FIELD_OPTION_COLORS.find((color) => !used.has(color)) ??
+    FIELD_OPTION_COLORS[existing.length % FIELD_OPTION_COLORS.length]
+  )
+}
 
 export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   title: 'Title',
