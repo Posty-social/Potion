@@ -494,9 +494,11 @@ export class WorkspaceRepository {
     const needle = input.query.trim().toLowerCase()
     const term = `%${escapeLike(input.query.trim())}%`
 
-    // A join (row → database → org), so this stays on select(). The SQL LIKE
-    // is a coarse prefilter (it also sees JSON keys and option ids); the
-    // precise match on text cells and the body happens below.
+    // A join (row → database → org), so this stays on select(). Cells are
+    // matched only for text-like columns, using the column types from the
+    // database schema, so column ids, option ids and user ids stored in the
+    // JSON never match (a query like "prop" or "add" can't crowd out real
+    // results).
     const candidates = await this.db
       .select({
         id: collectionRowTable.id,
@@ -522,13 +524,21 @@ export class WorkspaceRepository {
             ? undefined
             : eq(collectionRowTable.isArchived, false),
           or(
-            sql`${collectionRowTable.values} like ${term} escape '\\'`,
             sql`${collectionRowTable.body} like ${term} escape '\\'`,
+            sql`exists (
+              select 1
+              from json_each(${collectionRowTable.values}) as cell
+              join json_each(${collectionTable.schema}) as col
+                on json_extract(col.value, '$.id') = cell.key
+              where json_extract(col.value, '$.type') in ('title', 'text', 'url', 'email', 'phone')
+                and cell.type = 'text'
+                and cell.value like ${term} escape '\\'
+            )`,
           ),
         ),
       )
       .orderBy(asc(collectionRowTable.position))
-      .limit(input.limit * 4)
+      .limit(input.limit)
 
     const excerptOf = (text: string) => {
       const at = text.toLowerCase().indexOf(needle)

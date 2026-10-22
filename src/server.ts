@@ -1,7 +1,11 @@
 import handler from '@tanstack/react-start/server-entry'
 
 import { deleteUnusedAssets } from './lib/assets/cleanup.server'
-import { db, getRuntimeEnv, runWithSession } from './lib/db/connection'
+import {
+  createSessionDb,
+  getRuntimeEnv,
+  runWithSession,
+} from './lib/db/connection'
 
 export { PageDoc } from './lib/realtime/page-doc'
 
@@ -17,12 +21,14 @@ export default {
     _env: unknown,
     ctx: ExecutionContext,
   ) => {
+    // Reads start on the primary: deciding a file is unused must not rely
+    // on a read replica that hasn't seen a just-written reference yet.
+    const env = getRuntimeEnv()
     ctx.waitUntil(
-      runWithSession(async () => {
-        const { deleted } = await deleteUnusedAssets({
-          db,
-          bucket: getRuntimeEnv().ASSETS,
-        })
+      deleteUnusedAssets({
+        db: createSessionDb(env.DB, 'first-primary'),
+        bucket: env.ASSETS,
+      }).then(({ deleted }) => {
         // oxlint-disable-next-line no-console -- surfaces in Workers logs
         console.log(`asset cleanup: deleted ${deleted.length} unused upload(s)`)
       }),
