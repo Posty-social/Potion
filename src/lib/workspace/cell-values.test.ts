@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CellValueError,
+  buildRowConditions,
+  valuesByName,
   dateInputValue,
   formatDateValue,
   linkLabel,
@@ -110,5 +112,69 @@ describe('option colours', () => {
     )
     const full = FIELD_OPTION_COLORS.map((color) => ({ color }))
     expect(nextOptionColor(full)).toBe(FIELD_OPTION_COLORS[0])
+  })
+})
+
+describe('buildRowConditions', () => {
+  const properties: DatabaseProperty[] = [
+    { id: 'prop_title', name: 'Name', type: 'title' },
+    {
+      id: 'prop_status',
+      name: 'Status',
+      type: 'status',
+      options: [{ id: 'opt_done', name: 'Done', color: '#dcebdd' }],
+    },
+    { id: 'prop_owner', name: 'Owner', type: 'person' },
+    { id: 'prop_flag', name: 'Flag', type: 'checkbox' },
+    { id: 'prop_created', name: 'Created', type: 'created_time' },
+  ]
+  const build = (where: Record<string, unknown>) =>
+    buildRowConditions({
+      databaseId: 'database_1',
+      properties,
+      where,
+      members: [{ userId: 'user_ada', name: 'Ada', email: 'ada@x.y' }],
+    })
+
+  it('resolves names to ids and picks the match mode per column type', () => {
+    expect(
+      build({ status: 'done', Owner: 'ada@x.y', Name: 'bug', Flag: 'true' }),
+    ).toEqual([
+      { propertyId: 'prop_status', mode: 'equals', values: ['opt_done'] },
+      { propertyId: 'prop_owner', mode: 'includes', values: ['user_ada'] },
+      { propertyId: 'prop_title', mode: 'contains', values: ['bug'] },
+      { propertyId: 'prop_flag', mode: 'equals', values: [true] },
+    ])
+    expect(build({ Owner: null })).toEqual([
+      { propertyId: 'prop_owner', mode: 'empty', values: [] },
+    ])
+  })
+
+  it('rejects unknown columns and computed columns', () => {
+    expect(() => build({ Priority: 'high' })).toThrow(/has no column/)
+    expect(() => build({ Created: '2026-01-01' })).toThrow(/computed/)
+  })
+})
+
+describe('valuesByName', () => {
+  it('keys cells by name and keeps duplicate names apart', () => {
+    const out = valuesByName({
+      properties: [
+        { id: 'a', name: 'Notes', type: 'text' },
+        { id: 'b', name: 'Notes', type: 'text' },
+        { id: 'c', name: 'Created', type: 'created_time' },
+      ],
+      row: {
+        values: { a: 'one', b: 'two' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+      members: [],
+    })
+    expect(out).toEqual({
+      Notes: 'one',
+      'Notes (b)': 'two',
+      Created: '2026-01-01T00:00:00.000Z',
+    })
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { RowCondition } from '#/lib/workspace/cell-values'
 import { WorkspaceRepositoryError } from '#/lib/workspace/repository'
 import {
   nextOptionColor,
@@ -25,9 +26,36 @@ function makeRow(
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     pageId: null,
+    version: 1,
     isArchived: false,
     archivedAt: null,
     ...overrides,
+  }
+}
+
+/** JS mirror of the repository's SQL for a `where` condition. */
+function matchesCondition(row: DatabaseRow, condition: RowCondition): boolean {
+  const value = row.values[condition.propertyId]
+  switch (condition.mode) {
+    case 'empty':
+      return (
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (Array.isArray(value) && value.length === 0)
+      )
+    case 'contains':
+      return condition.values.some(
+        (item) =>
+          typeof value === 'string' &&
+          value.toLowerCase().includes(String(item).toLowerCase()),
+      )
+    case 'includes':
+      return condition.values.some((item) =>
+        (Array.isArray(value) ? value : [value]).includes(item as string),
+      )
+    default:
+      return condition.values.some((item) => value === item)
   }
 }
 
@@ -267,10 +295,15 @@ function createFakeRepository(): FakeRepository {
     // In-memory stand-ins for the SQL-paged repository reads.
     async getDatabaseRowsPage(databaseId, options) {
       const database = findBoard(databaseId)
+      const matching = database.rows.filter((row) =>
+        (options.where ?? []).every((condition) =>
+          matchesCondition(row, condition),
+        ),
+      )
       const visible = options.includeArchived
-        ? database.rows
-        : database.rows.filter((row) => !row.isArchived)
-      const archivedCount = database.rows.filter((row) => row.isArchived).length
+        ? matching
+        : matching.filter((row) => !row.isArchived)
+      const archivedCount = matching.filter((row) => row.isArchived).length
       return {
         database: {
           ...database,
@@ -286,6 +319,28 @@ function createFakeRepository(): FakeRepository {
         total: visible.length,
         archivedCount,
       }
+    },
+    async searchRows(input) {
+      const needle = input.query.toLowerCase()
+      return board.rows
+        .filter((row) => input.includeArchived || !row.isArchived)
+        .filter(
+          (row) =>
+            String(row.values.prop_title ?? '')
+              .toLowerCase()
+              .includes(needle) ||
+            (row.body ?? '').toLowerCase().includes(needle),
+        )
+        .slice(0, input.limit)
+        .map((row) => ({
+          rowId: row.id,
+          databaseId: board.id,
+          databaseTitle: board.title,
+          title: String(row.values.prop_title ?? ''),
+          isArchived: row.isArchived,
+          matchedIn: 'Name',
+          excerpt: String(row.values.prop_title ?? ''),
+        }))
     },
     async getPageForAgent(slug, rowPreviewLimit) {
       const page = pages.find((candidate) => candidate.slug === slug)
@@ -347,8 +402,18 @@ function createFakeRepository(): FakeRepository {
     },
     async updateRow(input) {
       const row = findRow(input.rowId)
+      if (
+        input.expectedVersion !== undefined &&
+        input.expectedVersion !== row.version
+      ) {
+        throw new WorkspaceRepositoryError(
+          'version_conflict',
+          `Row "${row.id}" has changed (you sent version ${input.expectedVersion}, current is ${row.version}).`,
+        )
+      }
       row.values = { ...row.values, ...input.values }
-      return
+      row.version += 1
+      return { version: row.version }
     },
     async updateRowBody(input) {
       findRow(input.rowId).body = input.body
@@ -1441,6 +1506,153 @@ describe('MCP board tools', () => {
     })
     expect(detached.status).toBe(404)
     expect(detached.error?.message).toContain('is not attached to page')
+  })
+
+  describe('reading for agents', () => {
+    it('read_database filters with where, using names like writes do', async () => {
+      const { repository, call } = boardHarness()
+      repository.board.rows.push(
+        makeRow('row_ada', {
+          prop_title: 'Upload broken',
+          prop_status: 'opt_todo',
+          prop_owner: ['user_ada'],
+          prop_prs: 'https://github.com/posty/app/pull/9',
+        }),
+      )
+
+      const read = async (where: Record<string, unknown>) => {
+        const result = await call('read_database', {
+          databaseId: 'database_bugs',
+          where,
+        })
+        expect(result.error).toBeUndefined()
+        const content = result.result?.structuredContent as {
+          database: { rows: Array<{ id: string }> }
+          paging: { total: number }
+        }
+        return content.database.rows.map((row) => row.id)
+      }
+
+      expect(await read({ Status: 'to do' })).toEqual(['row_login', 'row_ada'])
+      expect(await read({ Owner: 'ada@posty.social' })).toEqual(['row_ada'])
+      expect(await read({ PRs: 'pull/9' })).toEqual(['row_ada'])
+      expect(await read({ Owner: null })).toEqual(['row_login'])
+      expect(await read({ Status: ['Done', 'To do'], Name: 'login' })).toEqual([
+        'row_login',
+      ])
+
+      const unknown = await call('read_database', {
+        databaseId: 'database_bugs',
+        where: { Status: 'Blocked' },
+      })
+      expect(unknown.error?.message).toContain('has no option "Blocked"')
+    })
+
+    it('counts archived rows that match the filter', async () => {
+      const { call } = boardHarness()
+
+      const result = await call('read_database', {
+        databaseId: 'database_bugs',
+        where: { Status: 'Done' },
+      })
+      expect(result.result?.structuredContent).toMatchObject({
+        paging: { total: 0 },
+        archivedRowsHidden: 1,
+      })
+    })
+
+    it('returns readable values with valueFormat: names', async () => {
+      const { repository, call } = boardHarness()
+      repository.board.rows[0].values.prop_owner = ['user_ada']
+      repository.board.rows[0].values.prop_prs =
+        'https://github.com/posty/app/pull/1\nhttps://github.com/posty/app/pull/2'
+
+      const database = await call('read_database', {
+        databaseId: 'database_bugs',
+        valueFormat: 'names',
+      })
+      const row = (
+        (database.result?.structuredContent ?? {}) as {
+          database: { rows: Array<{ values: Record<string, unknown> }> }
+        }
+      ).database.rows[0]
+      expect(row.values).toMatchObject({
+        Name: 'Login fails',
+        Status: 'To do',
+        Owner: [
+          { id: 'user_ada', name: 'Ada Lovelace', email: 'ada@posty.social' },
+        ],
+        PRs: [
+          'https://github.com/posty/app/pull/1',
+          'https://github.com/posty/app/pull/2',
+        ],
+        Due: null,
+      })
+
+      const single = await call('read_row', {
+        rowId: 'row_login',
+        valueFormat: 'names',
+      })
+      expect(single.result?.structuredContent).toMatchObject({
+        row: { values: { Status: 'To do' }, body: 'Steps to reproduce…' },
+      })
+
+      const page = await call('read_page', {
+        slug: 'private-workspace',
+        valueFormat: 'names',
+      })
+      expect(page.result?.structuredContent).toMatchObject({
+        page: { databases: [{ rows: [{ values: { Status: 'To do' } }] }] },
+      })
+    })
+
+    it('search_rows finds cards by text and skips archived ones by default', async () => {
+      const { call } = boardHarness()
+
+      const found = await call('search_rows', { query: 'reproduce' })
+      expect(found.result?.structuredContent).toMatchObject({
+        rows: [{ rowId: 'row_login', databaseId: 'database_bugs' }],
+      })
+
+      const archived = await call('search_rows', { query: 'old crash' })
+      expect(archived.result?.structuredContent).toEqual({ rows: [] })
+      const withArchived = await call('search_rows', {
+        query: 'old crash',
+        includeArchived: true,
+      })
+      expect(withArchived.result?.structuredContent).toMatchObject({
+        rows: [{ rowId: 'row_old', isArchived: true }],
+      })
+    })
+  })
+
+  it('update_row returns the new version and honours expectedVersion', async () => {
+    const { call } = boardHarness()
+
+    const first = await call('update_row', {
+      rowId: 'row_login',
+      values: { Notes: 'first' },
+    })
+    expect(first.result?.structuredContent).toMatchObject({
+      row: { version: 2 },
+    })
+
+    const stale = await call('update_row', {
+      rowId: 'row_login',
+      values: { Notes: 'second' },
+      expectedVersion: 1,
+    })
+    expect(stale.status).toBe(409)
+    expect(stale.error?.message).toContain('current is 2')
+
+    const fresh = await call('update_row', {
+      rowId: 'row_login',
+      values: { Notes: 'second' },
+      expectedVersion: 2,
+    })
+    expect(fresh.result?.structuredContent).toMatchObject({
+      row: { version: 3 },
+    })
   })
 
   it('spells out invalid input in the error message', async () => {
